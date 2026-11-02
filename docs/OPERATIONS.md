@@ -115,7 +115,7 @@ the existing MVP without claiming production SaaS readiness.
 
 New sandbox creation is limited to 20 per source IP per hour per process. Financial writes retain the existing `/v1` limiter. Because forwarded-IP trust is not configured here, visitors behind nginx share the proxy's rate-limit bucket; configure ingress limits / trusted proxy settings before widening access. Browser Origin / Fetch Metadata checks reject cross-site session creation.
 
-Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. The host-only `/demo/session/holds` read uses explicit tenant/ledger scope and a transaction-local RLS tenant setting. All financial mutations use the public library services/routes.
+Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. `/demo/session/holds` uses the public hold list service with explicit tenant/ledger scope and opaque cursor pagination. All financial mutations use the public library services/routes.
 
 Expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. Use a dedicated demo database and the guarded operator reset only during maintenance when all sessions may be discarded; immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0005–0007 are upstream 0.5.0 grant index/refund support; 0008 adds the host session table.
 

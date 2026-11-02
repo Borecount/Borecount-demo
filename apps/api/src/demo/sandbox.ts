@@ -104,22 +104,31 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
 
   server.get<{ Querystring: { ledger_id: string; cursor?: string; limit?: number } }>('/demo/session/holds', {
     schema: { querystring: { type: 'object', additionalProperties: false, required: ['ledger_id'], properties: {
-      ledger_id: { type: 'string', format: 'uuid' }, cursor: { type: 'string', format: 'uuid' },
+      ledger_id: { type: 'string', format: 'uuid' }, cursor: { type: 'string', minLength: 1, maxLength: 2048 },
       limit: { type: 'integer', minimum: 1, maximum: 200, default: 25 },
     } } },
   }, async (request, reply) => {
     reply.header('cache-control', 'no-store');
     const row = await session(request);
     const { ledger_id, cursor, limit = 25 } = request.query;
-    // Library 0.5 has no public hold list. This host-only read is explicitly scoped.
-    const holds = await db.sql.begin(async sql => {
-      await sql.unsafe("select set_config('app.tenant_id', $1, true)", [row.tenant_id]);
-      return sql.unsafe(`select id, ledger_id, reference, description, state,
-        original_amount_minor::text, remaining_amount_minor::text, created_at
-        from holds where tenant_id = $1 and ledger_id = $2
-        and ($3::uuid is null or id > $3::uuid) order by id asc limit $4`,
-        [row.tenant_id, ledger_id, cursor ?? null, limit + 1]);
+    const page = await services.holds.list({
+      tenantId: row.tenant_id,
+      limit,
+      ...(cursor === undefined ? {} : { cursor }),
+      where: { ledgerId: { eq: ledger_id } },
     });
-    return { data: holds.slice(0, limit), next_cursor: holds.length > limit ? holds[limit - 1].id : null };
+    return {
+      data: page.data.map(hold => ({
+        id: hold.id,
+        ledger_id: hold.ledgerId,
+        reference: hold.reference,
+        description: hold.description,
+        state: hold.state,
+        original_amount_minor: hold.originalAmountMinor.toString(),
+        remaining_amount_minor: hold.remainingAmountMinor.toString(),
+        created_at: hold.createdAt.toISOString(),
+      })),
+      next_cursor: page.nextCursor,
+    };
   });
 }
