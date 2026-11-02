@@ -50,6 +50,12 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   await call('POST', `/v1/holds/${hold.hold_id}/void`, undefined, 200);
   const holds = (await call('GET', `/demo/session/holds?ledger_id=${ledger.id}`, undefined, 200)).body;
   assert.equal(holds.data[0].state, 'VOIDED');
+  assert.equal(typeof holds.data[0].created_at, 'string');
+  assert.equal(holds.data[0].original_amount_minor, '2500');
+  assert.deepEqual(
+    (await call('GET', `/demo/session/holds?ledger_id=${eurLedger.id}`, undefined, 200)).body.data,
+    [],
+  );
   const invalid = tx('bulk-bad'); invalid.entries[1].signed_amount_minor = '-2499';
   await call('POST', '/v1/transactions/bulk', { transactions: [tx('bulk-rollback-first', '100'), invalid] }, 400);
   const rolledBack = (await call('GET', '/v1/transactions?where=' + encodeURIComponent(JSON.stringify({ reference: { eq: 'bulk-rollback-first' } })), undefined, 200)).body;
@@ -79,6 +85,13 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   assert.ok(preview.items.length);
   await call('POST', '/v1/credit-grants/expiration/run', { as_of, limit: 25 }, 200);
   await call('POST', `/v1/holds/${reserved.hold_id}/void`, undefined, 200);
+  const firstHoldPage = (await call('GET', `/demo/session/holds?ledger_id=${ledger.id}&limit=1`, undefined, 200)).body;
+  assert.equal(firstHoldPage.data.length, 1);
+  assert.ok(firstHoldPage.next_cursor);
+  assert.doesNotMatch(firstHoldPage.next_cursor, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
+  const nextHoldPage = (await call('GET', `/demo/session/holds?ledger_id=${ledger.id}&limit=1&cursor=${encodeURIComponent(firstHoldPage.next_cursor)}`, undefined, 200)).body;
+  assert.equal(nextHoldPage.data.length, 1);
+  assert.notEqual(firstHoldPage.data[0].id, nextHoldPage.data[0].id);
   await call('POST', '/v1/credit-grants/expiration/run', { as_of, limit: 25 }, 200);
   const creditBalance = (await call('GET', `/v1/accounts/${id('credits:alice')}/credit-balance`, undefined, 200)).body;
   assert.equal(creditBalance.remaining_minor, '0');

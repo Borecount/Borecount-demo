@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { AccountSide, type ApplicationServices } from '@borecount/core/application';
+import {
+  AccountSide,
+  HoldNotFoundError,
+  type ApplicationServices,
+  type HoldSummary,
+} from '@borecount/core/application';
 import { OverdraftPolicy, type AccountEntity } from '@borecount/core/account';
 import type { DbClient } from '@borecount/postgres-adapter';
 
@@ -38,30 +43,42 @@ export class DemoService {
     },
   ) {}
 
-  async getState() {
+  async getState(holdsCursor?: string, completedHoldsCursor?: string) {
     const { tenantId, ledgerId } = await this.context();
     const accounts = await this.accounts(tenantId, ledgerId);
     const addresses = new Map(accounts.map((account) => [account.id, account.name]));
     const transactions = await this.services.transactions.list({ tenantId, ledgerId, limit: 100 });
 
-    // The released service has no hold-list operation. This tenant/ledger-scoped
-    // read is presentation only; all lifecycle mutations use the public hold service.
-    // Active holds must remain actionable even after the completed history fills up.
-    const holds = await this.db.sql`select id, reference, description, state,
-      original_amount_minor::text as original_amount_minor,
-      remaining_amount_minor::text as remaining_amount_minor
-      from (
-        select * from holds
-        where tenant_id = ${tenantId} and ledger_id = ${ledgerId} and state = 'HELD'
-        union all
-        (select * from holds
-        where tenant_id = ${tenantId} and ledger_id = ${ledgerId} and state <> 'HELD'
-        order by created_at desc, id desc limit 100)
-      ) as demo_holds
-      order by created_at desc, id desc`;
+    // Keep every response bounded and cursorable; completed history is fetched oldest-first.
+    const [activeHolds, completedHolds] = await Promise.all([
+      this.services.holds.list({
+        tenantId,
+        limit: 25,
+        ...(holdsCursor === undefined ? {} : { cursor: holdsCursor }),
+        where: { ledgerId: { eq: ledgerId }, state: { eq: 'HELD' } },
+      }),
+      this.services.holds.list({
+        tenantId,
+        limit: 100,
+        ...(completedHoldsCursor === undefined ? {} : { cursor: completedHoldsCursor }),
+        where: { ledgerId: { eq: ledgerId }, state: { ne: 'HELD' } },
+      }),
+    ]);
+    const holds = [...activeHolds.data, ...completedHolds.data]
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id))
+      .map(hold => ({
+        id: hold.id,
+        reference: hold.reference,
+        description: hold.description,
+        state: hold.state,
+        original_amount_minor: hold.originalAmountMinor.toString(),
+        remaining_amount_minor: hold.remainingAmountMinor.toString(),
+      }));
     const trial = await this.services.balances.getTrialBalance({ tenantId, ledgerId });
     return {
       holds,
+      active_holds_next_cursor: activeHolds.nextCursor,
+      completed_holds_next_cursor: completedHolds.nextCursor,
       trial_balance: { debits_minor: trial.totalDebitsMinor.toString(),
         credits_minor: trial.totalCreditsMinor.toString() },
       transactions_limited: transactions.nextCursor !== null,
@@ -188,9 +205,14 @@ export class DemoService {
 
   async resolveHold(holdId: string, action: 'commit' | 'void') {
     const { tenantId, ledgerId } = await this.context();
-    const rows = await this.db.sql`select id from holds where id = ${holdId}
-      and tenant_id = ${tenantId} and ledger_id = ${ledgerId}`;
-    if (rows.length === 0) throw new DemoInputError('Unknown demo hold');
+    let hold: HoldSummary;
+    try {
+      hold = await this.services.holds.getById(tenantId, holdId);
+    } catch (error) {
+      if (error instanceof HoldNotFoundError) throw new DemoInputError('Unknown demo hold');
+      throw error;
+    }
+    if (hold.ledgerId !== ledgerId) throw new DemoInputError('Unknown demo hold');
     if (action === 'commit') {
       await this.services.holds.commit({ tenantId, holdId, reference: `demo-commit-${holdId}` });
     } else {

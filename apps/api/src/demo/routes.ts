@@ -13,9 +13,14 @@ export const registerDemoRoutes = (
   demo: DemoService,
   options: { resetEnabled: boolean },
 ): void => {
-  server.get('/demo/state', async (_request, reply) => {
+  server.get<{ Querystring: { holds_cursor?: string; completed_holds_cursor?: string } }>('/demo/state', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+      holds_cursor: { type: 'string', minLength: 1, maxLength: 2048 },
+      completed_holds_cursor: { type: 'string', minLength: 1, maxLength: 2048 },
+    } } },
+  }, async (request, reply) => {
     try {
-      return await demo.getState();
+      return await demo.getState(request.query.holds_cursor, request.query.completed_holds_cursor);
     } catch (error) {
       return handleError(reply, error);
     }
