@@ -8,9 +8,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
-    "bootstrap:admin-key": "tsx src/bootstrap-admin-key.ts",
-    "seed:demo": "tsx src/seed-demo.ts",
-    "reset:demo": "tsx src/reset-demo.ts"
+    "bootstrap:admin-key": "tsx src/bootstrap-admin-key.ts"
   },
   "dependencies": {
     "@borecount/core": "0.7.0",

@@ -1,12 +1,24 @@
 # Scenario Cookbook
 
-These copy/paste scenarios extend the [README walkthrough](../README.md). They assume `BASE_URL`, `ACCESS_TOKEN`, `LEDGER_ID`, `DEBIT_ACCOUNT_ID`, `CREDIT_ACCOUNT_ID`, and `TRANSACTION_ID` are exported by that walkthrough.
+These copy/paste scenarios use a private sandbox session for host-owned tenant provisioning, then public `/v1` APIs for every business flow. They do not require a bootstrap admin key or shared tenant.
 
-Use this helper to print body followed by HTTP status:
+Create a session, then create an isolated ledger, accounts, and one transaction for the examples:
 
 ```sh
+export BASE_URL=http://localhost:3000
+json_value() { node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s)[process.argv[1]]))' "$1"; }
+SESSION="$(curl -fsS -c /tmp/borecount-sandbox.cookies -H "Origin: $BASE_URL" -X POST "$BASE_URL/demo/session")"
+export ACCESS_TOKEN="$(printf '%s' "$SESSION" | json_value access_token)"
 api() { curl -sS -w '\nHTTP %{http_code}\n' -H "Authorization: Bearer $ACCESS_TOKEN" "$@"; }
+
+LEDGER_ID="$(api -X POST -H 'content-type: application/json' -d '{"name":"Scenario cookbook"}' "$BASE_URL/v1/ledgers" | sed -n '1p' | json_value id)"
+DEBIT_ACCOUNT_ID="$(api -X POST -H 'content-type: application/json' -d "{\"ledger_id\":\"$LEDGER_ID\",\"code\":\"1000\",\"name\":\"Cash\",\"side\":\"DEBIT\",\"overdraft_policy\":\"ALLOW\",\"currency\":\"USD\"}" "$BASE_URL/v1/accounts" | sed -n '1p' | json_value id)"
+CREDIT_ACCOUNT_ID="$(api -X POST -H 'content-type: application/json' -d "{\"ledger_id\":\"$LEDGER_ID\",\"code\":\"4000\",\"name\":\"Revenue\",\"side\":\"CREDIT\",\"overdraft_policy\":\"ALLOW\",\"currency\":\"USD\"}" "$BASE_URL/v1/accounts" | sed -n '1p' | json_value id)"
+TX_BODY="{\"ledger_id\":\"$LEDGER_ID\",\"reference\":\"quickstart-sale-001\",\"currency\":\"USD\",\"description\":\"Quickstart sale\",\"entries\":[{\"account_id\":\"$DEBIT_ACCOUNT_ID\",\"signed_amount_minor\":\"1250\",\"currency\":\"USD\"},{\"account_id\":\"$CREDIT_ACCOUNT_ID\",\"signed_amount_minor\":\"-1250\",\"currency\":\"USD\"}]}"
+TRANSACTION_ID="$(api -X POST -H 'content-type: application/json' -d "$TX_BODY" "$BASE_URL/v1/transactions" | sed -n '1p' | json_value transaction_id)"
 ```
+
+The private cookie is stored in `/tmp/borecount-sandbox.cookies`; the SERVICE token expires in 15 minutes. To renew it, call `GET /demo/session` with that cookie and read the returned `access_token`.
 
 Generated IDs and timestamps are shown as placeholders. Error messages are useful diagnostics, but clients should branch on status and `error` code.
 
@@ -76,7 +88,7 @@ Expected `HTTP 400`:
 
 ## Idempotent payload mismatch
 
-The README already created `quickstart-sale-001` for 1250. Reuse that tenant-scoped reference with a changed amount:
+The setup above created `quickstart-sale-001` for 1250. Reuse that tenant-scoped reference with a changed amount:
 
 ```sh
 api -X POST -H 'content-type: application/json' \

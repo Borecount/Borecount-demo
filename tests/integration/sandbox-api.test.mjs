@@ -40,6 +40,29 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
     { account_id: id(from), signed_amount_minor: amount, currency }, { account_id: id(to), signed_amount_minor: '-' + amount, currency },
   ];
   const tx = (reference, amount = '2500') => ({ ledger_id: ledger.id, reference, currency, metadata: { provider: { order: '1042' } }, entries: entries(amount) });
+  const createdAccount = (await call('POST', '/v1/accounts', {
+    ledger_id: ledger.id, name: 'wallet:charlie', side: 'CREDIT',
+    overdraft_policy: 'DISALLOW', currency,
+  }, 201)).body;
+  assert.equal(createdAccount.name, 'wallet:charlie');
+  const fundingTransaction = (await call('POST', '/v1/transactions', {
+    ledger_id: ledger.id, reference: 'sandbox-fund-charlie', currency,
+    metadata: { provider: { order: '1042' } },
+    entries: [
+      { account_id: id('system:funding'), signed_amount_minor: '750', currency },
+      { account_id: createdAccount.id, signed_amount_minor: '-750', currency },
+    ],
+  }, 201)).body;
+  const charlieBalance = (await call('GET',
+    `/v1/accounts/${createdAccount.id}/balance-as-of?at=${encodeURIComponent(new Date().toISOString())}`,
+    undefined, 200)).body;
+  assert.equal(charlieBalance.account_id, createdAccount.id);
+  assert.equal(charlieBalance.posted_minor, '-750');
+  const fundedTransaction = (await call('GET', `/v1/transactions/${fundingTransaction.transaction_id}`, undefined, 200)).body;
+  assert.deepEqual(fundedTransaction.metadata, { provider: { order: '1042' } });
+  const fundingEntries = (await call('GET', `/v1/entries?where=${encodeURIComponent(JSON.stringify({ transaction_id: { eq: fundingTransaction.transaction_id } }))}`, undefined, 200)).body.data;
+  assert.equal(fundingEntries.length, 2);
+  assert.equal(fundingEntries.reduce((sum, item) => sum + BigInt(item.signed_amount_minor), 0n), 0n);
   const created = await call('POST', '/v1/transactions', tx('sandbox-payment'), 201);
   const retry = await call('POST', '/v1/transactions', tx('sandbox-payment'), 200);
   assert.equal(retry.body.created, false); assert.equal(retry.body.transaction_id, created.body.transaction_id);
@@ -48,6 +71,18 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   const partial = (await call('POST', `/v1/holds/${hold.hold_id}/commit`, { reference: 'sandbox-capture', amount_minor: '1000' }, 201)).body;
   assert.equal(partial.remaining_amount_minor, '1500');
   await call('POST', `/v1/holds/${hold.hold_id}/void`, undefined, 200);
+  const holdSummary = (await call('GET', `/v1/holds/${hold.hold_id}`, undefined, 200)).body;
+  assert.equal(holdSummary.state, 'VOIDED');
+  assert.equal(holdSummary.original_amount_minor, '2500');
+  assert.equal(holdSummary.remaining_amount_minor, '0');
+  const holdEntries = (await call('GET', `/v1/holds/${hold.hold_id}/entries`, undefined, 200)).body.data;
+  assert.equal(holdEntries.length, 2);
+  assert.equal(holdEntries.reduce((sum, item) => sum + BigInt(item.signed_amount_minor), 0n), 0n);
+  const captures = (await call('GET', `/v1/holds/${hold.hold_id}/captures`, undefined, 200)).body.data;
+  assert.equal(captures.length, 1);
+  assert.equal(captures[0].amount_minor, '1000');
+  assert.deepEqual((await call('GET', `/v1/holds/${hold.hold_id}/credit-allocations`, undefined, 200)).body.data, []);
+  await call('GET', '/v1/holds/00000000-0000-4000-8000-000000000499/entries', undefined, 404);
   const holdWhere = encodeURIComponent(JSON.stringify({ ledger_id: { eq: ledger.id } }));
   const holds = (await call('GET', `/v1/holds?where=${holdWhere}`, undefined, 200)).body;
   assert.equal(holds.data[0].state, 'VOIDED');
@@ -72,6 +107,10 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   await call('POST', '/v1/credit-grants', grantBody, 200);
   const consumption = (await call('POST', '/v1/transactions', { ...tx('credit-consume'), entries: entries('1200', 'credits:alice', 'service:usage') }, 201)).body;
   const reserved = (await call('POST', '/v1/holds', { ledger_id: ledger.id, reference: 'credit-auth', currency, entries: entries('1000', 'credits:alice', 'service:usage') }, 201)).body;
+  const holdAllocations = (await call('GET', `/v1/holds/${reserved.hold_id}/credit-allocations`, undefined, 200)).body.data;
+  assert.ok(holdAllocations.length > 0);
+  assert.equal(holdAllocations[0].grant_id, grant.id);
+  assert.equal(holdAllocations.reduce((sum, item) => sum + BigInt(item.amount_minor), 0n), 1000n);
   await call('POST', `/v1/credit-grants/${grant.id}/refund`, { reference: 'grant-over-refund', amount_minor: '3000' }, 409);
   await call('POST', `/v1/credit-grants/${grant.id}/refund`, { reference: 'grant-refund', amount_minor: '500' }, 201);
   await call('POST', `/v1/credit-grants/${grant.id}/reversal`, { reference: 'grant-bad-reversal' }, 409);

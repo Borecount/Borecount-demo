@@ -34,10 +34,8 @@ Read panels accept endpoint-specific `where` JSON, for example `{"status":{"eq":
 
 ## Host boundaries
 
-`POST/GET /demo/session` handles private provisioning/token renewal. Session cookies are HttpOnly, SameSite=Strict, Secure behind HTTPS; financial access is SERVICE-only, tenant-scoped and expires after eight hours. `New sandbox` replaces only this session. Tabs in the same browser profile share the cookie; a stale tab's revoked token requires a new page load.
+`POST /demo/session` provisions a private tenant and returns a short-lived SERVICE bearer. `GET /demo/session` renews the bearer using the HttpOnly, SameSite=Strict session cookie; it is Secure behind HTTPS. `New sandbox` replaces only this session. Tabs in the same browser profile share the cookie; a stale tab's revoked token requires a new page load.
 
 The Holds panel uses one cursor-paginated list from `GET /v1/holds`, scoped to the selected ledger. Choose **All states**, **Active (HELD)**, **Applied (APPLIED)**, or **Voided (VOIDED)** to filter the same list; changing the state clears the current cursor. Pages default to 50 holds.
 
-The legacy `/demo/state` response exposes the same public hold-summary page as `holds: { data, next_cursor }`. It accepts standard `limit` (default 50, maximum 200), opaque `cursor`, and typed JSON `where` filters. Tenant and ledger scope remain fixed by the demo service; `tenant_id` and `ledger_id` are excluded from `where`. Use `state: { eq: "HELD" }` to find active reservations across the full history. Cursor tokens are bound to the same filters, so keep `where` unchanged when requesting the next page. Assets are provisioned with public application services by the host.
-
-The legacy shared `/demo/state` and financial wrapper routes are available only outside production, for compatibility tests. Their global reset is not invoked by the console. New financial flows never depend on those wrappers. Expired sandbox histories remain in the dedicated database; see the operations runbook for maintenance.
+All business requests, including hold reads, use the public `/v1` contract with the session's SERVICE bearer. The host owns session metadata and tenant provisioning; financial rules remain in the released packages.
