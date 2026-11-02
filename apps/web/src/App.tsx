@@ -143,7 +143,7 @@ export function App() {
     try {
       const result = await request<Json>(operation, undefined, true);
       const body = asObject(result);
-      if (operation.path === '/v1/credit-grants/expiration/preview' && typeof body.as_of === 'string') setExpirationAsOf(body.as_of);
+      if (operation.path === '/v1/credit-grants/expiration/preview' && typeof operation.body?.as_of === 'string') setExpirationAsOf(operation.body.as_of);
       if (operation.method === 'POST' && operation.path.startsWith('/v1/')) {
         setLastSent(structuredClone(operation));
         setIds(old => ({ ...old,

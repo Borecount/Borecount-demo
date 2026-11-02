@@ -98,7 +98,14 @@ test('credits expose grant issuance, consumption, partial refunds and lineage', 
   await page.getByRole('button', { name: 'Refresh preview timestamp', exact: true }).click();
   const refreshed = JSON.parse(await page.getByLabel('Request JSON').inputValue());
   expect(Date.parse(refreshed.as_of)).toBeGreaterThan(Date.parse(preview.as_of));
+  let refreshedPreviewBody: Record<string, unknown> | undefined;
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/v1/credit-grants/expiration/preview') {
+      refreshedPreviewBody = request.postDataJSON() as Record<string, unknown>;
+    }
+  });
   await page.getByRole('button', { name: 'Send request', exact: true }).click();
+  expect(refreshedPreviewBody?.as_of).toBe(refreshed.as_of);
   await expect(page.getByRole('region', { name: 'Request journal' })).toContainText(refreshed.as_of);
   await page.getByRole('button', { name: 'Run expiration', exact: true }).click();
   const run = JSON.parse(await page.getByLabel('Request JSON').inputValue());
