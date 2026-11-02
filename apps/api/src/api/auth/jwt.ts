@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { ApiKeyRole, type AuthContext, UnauthorizedError } from '@luxledger/core/application';
+import { ApiKeyRole, type AuthContext, UnauthorizedError } from '@borecount/core/application';
 
 const JWT_HEADER = {
   alg: 'HS256',

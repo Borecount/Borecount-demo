@@ -11,14 +11,14 @@ import { ApiMetrics } from '@api/observability/metrics';
 import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
 import type { EndpointRateLimitConfig, RateLimitConfig } from '@api/rate-limit/policy';
 import type { CreateServerCoreOptions } from '@api/server-types';
-import type { ApplicationServices } from '@luxledger/core/application';
-import { ApiKeyRole, ForbiddenError, UnauthorizedError } from '@luxledger/core/application';
-import { registerLedgerAdapter } from '@luxledger/fastify-routes';
+import type { ApplicationServices } from '@borecount/core/application';
+import { ApiKeyRole, ForbiddenError, UnauthorizedError } from '@borecount/core/application';
+import { registerLedgerAdapter } from '@borecount/fastify-routes';
 import {
   type AuthTokenRequestHeaders,
   type AuthTokenResponse,
   authTokenResponseSchema,
-} from '@luxledger/http/contracts';
+} from '@borecount/http/contracts';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 
 const API_KEY_HEADER = 'x-api-key';
@@ -41,7 +41,7 @@ const SWAGGER_UI_HTML = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LuxLedger API Docs</title>
+    <title>Borecount API Docs</title>
     <link rel="stylesheet" href="/docs/swagger-ui.css" />
   </head>
   <body>
@@ -85,7 +85,7 @@ const SWAGGER_UI_HTML = `<!doctype html>
               if ('access_token' in body) body.access_token = '[redacted]';
               if ('api_key' in body) body.api_key = '[redacted]';
             }
-            parent.postMessage({ type: 'luxledger-api-response', record: {
+            parent.postMessage({ type: 'borecount-api-response', record: {
               request: window.demoApiRequest, status: response.status, response: body,
               duration: Math.round(performance.now() - window.demoApiStarted), requestId: response.headers['x-request-id'] || null
             } }, location.origin);

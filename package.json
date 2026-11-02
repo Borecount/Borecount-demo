@@ -1,5 +1,5 @@
 {
-  "name": "luxledger-demo",
+  "name": "borecount-demo",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -7,21 +7,21 @@
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
-    "dev:api": "npm run dev -w @luxledger/demo-api",
+    "dev:api": "npm run dev -w @borecount/demo-api",
     "dev:local": "concurrently -n api,web -c blue,green \"npm run dev:api:local\" \"npm run dev:web\"",
     "dev:api:local": "node --env-file=.env --watch --import tsx apps/api/src/index.ts",
-    "dev:web": "npm run dev -w @luxledger/demo-web",
+    "dev:web": "npm run dev -w @borecount/demo-web",
     "demo": "node scripts/demo-local.mjs",
-    "start": "npm run start -w @luxledger/demo-api",
-    "start:hosted": "npm run db:migrate -w @luxledger/demo-api && npm run seed:demo -w @luxledger/demo-api && npm run start -w @luxledger/demo-api",
+    "start": "npm run start -w @borecount/demo-api",
+    "start:hosted": "npm run db:migrate -w @borecount/demo-api && npm run seed:demo -w @borecount/demo-api && npm run start -w @borecount/demo-api",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "db:migrate": "npm run db:migrate -w @luxledger/demo-api",
+    "db:migrate": "npm run db:migrate -w @borecount/demo-api",
     "db:migrate:local": "node --env-file=.env scripts/migrate-local.mjs",
-    "bootstrap:admin-key": "npm run bootstrap:admin-key -w @luxledger/demo-api",
+    "bootstrap:admin-key": "npm run bootstrap:admin-key -w @borecount/demo-api",
     "bootstrap:admin-key:local": "node --env-file=.env --import tsx apps/api/src/bootstrap-admin-key.ts",
-    "seed:demo": "npm run seed:demo -w @luxledger/demo-api",
+    "seed:demo": "npm run seed:demo -w @borecount/demo-api",
     "seed:demo:local": "node --env-file=.env --import tsx apps/api/src/seed-demo.ts",
-    "reset:demo": "npm run reset:demo -w @luxledger/demo-api",
+    "reset:demo": "npm run reset:demo -w @borecount/demo-api",
     "build": "npm run build --workspaces --if-present",
     "verify:openapi": "node scripts/verify-openapi.mjs && node scripts/generate-api-types.mjs --check",
     "test:unit": "node --test tests/unit/*.test.mjs",
@@ -34,5 +34,9 @@
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "concurrently": "^9.2.0"
+  },
+  "overrides": {
+    "fastify": "5.10.0",
+    "drizzle-orm": "0.45.2"
   }
 }

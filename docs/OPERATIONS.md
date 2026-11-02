@@ -16,7 +16,7 @@ The demo reads process environment directly. Node forbids `--env-file` in `NODE_
 | `SHUTDOWN_TIMEOUT_MS` | `10000` | Positive integer hard deadline for graceful shutdown. |
 | `JWT_SIGNING_KEY` | **Required** | Unpadded base64url encoding of at least 32 random bytes. Secret. |
 | `JWT_PREVIOUS_SIGNING_KEYS` | Empty | Comma-separated valid old signing keys; no duplicates and must exclude current key. |
-| `JWT_ISSUER` | `luxledger-api` | Issuer written to and required from access tokens. |
+| `JWT_ISSUER` | `borecount-api` | Issuer written to and required from access tokens. |
 | `JWT_ACCESS_TTL_SECONDS` | `900` | Integer 300–900; the supported/documented demo profile is exactly `900`. |
 | `JWT_CLOCK_SKEW_SECONDS` | `5` | Integer 0–60 used for `iat`/`exp` verification. |
 | `RATE_LIMIT_AUTH_TOKEN_MAX_REQUESTS` | `20` | Positive integer token-exchange requests per source IP/window/process. |
@@ -75,7 +75,7 @@ npm run db:migrate:local
 For a release:
 
 1. back up the database and test restore;
-2. compare installed package versions and the canonical OpenAPI contract with the target LuxLedger release;
+2. compare installed package versions and the canonical OpenAPI contract with the target Borecount release;
 3. rehearse migration against a production-like copy;
 4. quiesce incompatible writers if a future migration requires it;
 5. run migrations once as a release job, not independently in every replica;

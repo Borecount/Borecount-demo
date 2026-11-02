@@ -5,4 +5,4 @@ export {
   RepositoryError,
   TransactionNotFoundError,
   UnauthorizedError,
-} from '@luxledger/core/application';
+} from '@borecount/core/application';

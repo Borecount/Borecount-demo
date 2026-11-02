@@ -1,12 +1,12 @@
-# LuxLedger Demo
+# Borecount Demo
 
-Interactive reference console composing `@luxledger/core`, Fastify, Drizzle, PostgreSQL, and React into wallets, marketplace settlement, authorizations, prepaid credits, and finance workflows. The checked-in LuxLedger contract is [OpenAPI 0.5.0](openapi/openapi.yaml).
+Interactive reference console composing `@borecount/core`, Fastify, Drizzle, PostgreSQL, and React into wallets, marketplace settlement, authorizations, prepaid credits, and finance workflows. The checked-in Borecount contract is [OpenAPI 0.6.0](openapi/openapi.yaml).
 
 The browser sends actual `/v1/*` requests using the released OpenAPI payloads and responses. Each browser session gets an isolated tenant, USD/EUR ledgers, six accounts per ledger, and a short-lived SERVICE token. Bootstrap administrative credentials remain server-side. The **API docs** link opens locally served Swagger UI with authenticated **Try it out** in a separate tab.
 
 See [the console guide](docs/CONSOLE.md) for every scenario, endpoint family, and sandbox boundary.
 
-The wider product guarantees and package boundaries are maintained in the upstream [LuxLedger documentation](https://github.com/Crusader4Christ/LuxLedger/tree/main/docs). This repository documents the behavior of the exact package set pinned by the demo.
+The wider product guarantees and package boundaries are maintained in the upstream [Borecount documentation](https://github.com/Borecount/Borecount/tree/main/docs). This repository documents the behavior of the exact package set pinned by the demo.
 
 ## 10–15 minute quickstart
 
@@ -38,7 +38,7 @@ After the initial install and `.env` setup above, start PostgreSQL, apply migrat
 npm run demo
 ```
 
-When `LuxLedger demo is ready` appears, open `http://localhost:5173`. Stop API and web with `Ctrl+C`; PostgreSQL remains available for the next run.
+When `Borecount demo is ready` appears, open `http://localhost:5173`. Stop API and web with `Ctrl+C`; PostgreSQL remains available for the next run.
 
 The steps below describe the same setup individually for readers learning how the backend is composed.
 
@@ -122,7 +122,7 @@ Then run the complete verification pipeline:
 npm test
 ```
 
-The pipeline checks unit helpers, canonical OpenAPI equality, generated client types, schema drift, TypeScript, and the production build. It recreates only `luxledger_demo_test`, checks legacy compatibility and real `/v1` workflows (isolation, retries, rollback, partial captures, refunds, expiration, statements and reconciliation), then exercises the console, CSV import, Swagger execution and mobile layout in Chromium. The test database guard rejects any `DATABASE_URL_TEST` whose database name is not exactly `luxledger_demo_test`.
+The pipeline checks unit helpers, canonical OpenAPI equality, generated client types, schema drift, TypeScript, and the production build. It recreates only `luxledger_demo_test`, checks real `/v1` workflows (isolation, retries, rollback, partial captures, refunds, expiration, statements and reconciliation), then exercises the console, CSV import, Swagger execution and mobile layout in Chromium. The test database guard rejects any `DATABASE_URL_TEST` whose database name is not exactly `luxledger_demo_test`.
 
 Individual commands are `npm run test:unit`, `npm run verify:openapi`, `npm run test:integration`, and `npm run test:e2e`.
 
@@ -273,7 +273,14 @@ Representative bodies (IDs/timestamps vary), each followed by `200`:
 - [Scenario cookbook](docs/SCENARIOS.md): failure modes, bulk atomicity, reversal/correction, holds, backdating, and reconciliation.
 - [Operations guide](docs/OPERATIONS.md): environment, probes, metrics, shutdown, migrations, and production limitations.
 - [Architecture](ARCHITECTURE.md): package boundaries, tenancy, transactions, error mapping, and deployment.
-- Upstream references: [product overview](https://github.com/Crusader4Christ/LuxLedger/blob/main/docs/product/overview.md), [ledger invariants](https://github.com/Crusader4Christ/LuxLedger/blob/main/docs/product/invariants.md), and [known limitations](https://github.com/Crusader4Christ/LuxLedger/blob/main/docs/product/limitations.md).
+- Upstream references: [product overview](https://github.com/Borecount/Borecount/blob/main/docs/product/overview.md), [ledger invariants](https://github.com/Borecount/Borecount/blob/main/docs/product/invariants.md), and [known limitations](https://github.com/Borecount/Borecount/blob/main/docs/product/limitations.md).
 - Raw contract: `GET /openapi.yaml`; Swagger UI: `GET /docs` (its assets load from a public CDN).
 
 Stop local services with `docker compose down`. Add `-v` only when you intentionally want to delete the demo database volume.
+
+## Rebrand identities
+
+Package names and active branding use Borecount. Existing database names/users,
+Docker volumes, reset guards and backup identities remain unchanged. The hosted
+endpoint `https://luxledger-demo.onrender.com/` retains its deployed address until
+a separate hosting change; the page metadata continues to use that working URL.

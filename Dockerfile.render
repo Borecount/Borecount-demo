@@ -11,7 +11,7 @@ COPY apps/api apps/api
 COPY apps/web apps/web
 COPY drizzle drizzle
 COPY openapi openapi
-RUN npm run build -w @luxledger/demo-web
+RUN npm run build -w @borecount/demo-web
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends nginx \

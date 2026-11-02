@@ -1,4 +1,4 @@
-import { createApiKeyService, createDbClient } from '@luxledger/postgres-adapter';
+import { createApiKeyService, createDbClient } from '@borecount/postgres-adapter';
 import { isMainModule } from './utils/is-main-module';
 
 const requireEnv = (name: string): string => {

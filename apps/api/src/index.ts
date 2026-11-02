@@ -5,7 +5,7 @@ import { DemoService } from './demo/demo-service';
 import { registerDemoRoutes } from './demo/routes';
 import { registerSandbox } from './demo/sandbox';
 import { isMainModule } from './utils/is-main-module';
-import { createApplicationServices, createDbClient } from '@luxledger/postgres-adapter';
+import { createApplicationServices, createDbClient } from '@borecount/postgres-adapter';
 
 const parsePort = (value: string | undefined): number => {
   if (value === undefined) {

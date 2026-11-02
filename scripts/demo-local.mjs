@@ -36,7 +36,7 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 try {
   await waitForApi();
-  console.log('\nLuxLedger demo is ready: http://localhost:5173\n');
+  console.log('\nBorecount demo is ready: http://localhost:5173\n');
   const code = await new Promise((resolve, reject) => {
     application.once('error', reject);
     application.once('exit', (exitCode) => resolve(exitCode ?? 1));

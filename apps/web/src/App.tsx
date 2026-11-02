@@ -206,11 +206,11 @@ export function App() {
   const reportQuery = { from: reportFrom, as_of: reportAsOf, limit: 25 };
 
   return <main>
-    <header><a className="brand" href="/"><span className="mark">L</span>LuxLedger</a><nav>
-      <a href="https://github.com/Crusader4Christ/LuxLedger" target="_blank" rel="noreferrer">GitHub ↗</a><a href="/docs?demo=1" target="_blank" rel="noreferrer">API docs ↗</a>
+    <header><a className="brand" href="/"><span className="mark">B</span>Borecount</a><nav>
+      <a href="https://github.com/Borecount/Borecount" target="_blank" rel="noreferrer">GitHub ↗</a><a href="/docs?demo=1" target="_blank" rel="noreferrer">API docs ↗</a>
     </nav></header>
     <section className="hero"><p className="eyebrow">OPEN-SOURCE FINANCIAL INFRASTRUCTURE</p><h1>The ledger layer for products that move money.</h1><p className="hero-copy">Build wallets, marketplaces, payouts, and stored-value products without maintaining double-entry invariants in application code.</p>
-      <div className="hero-actions"><a className="button-link primary" href="#flows">Try the live demo</a><a className="button-link secondary" href="mailto:herman.klushin@gmail.com?subject=LuxLedger%20design%20partnership">Become a design partner</a></div>
+      <div className="hero-actions"><a className="button-link primary" href="#flows">Try the live demo</a><a className="button-link secondary" href="mailto:herman.klushin@gmail.com?subject=Borecount%20design%20partnership">Become a design partner</a></div>
       <p className="hero-note">Built for Node.js teams · PostgreSQL-backed · Framework-agnostic core</p>
     </section>
     <div className="proof-strip hero-proof"><div><strong>Atomic</strong><span>postings, holds and bulk rollback</span></div><div><strong>Idempotent</strong><span>safe retries by reference</span></div><div><strong>Auditable</strong><span>reversals, history and statements</span></div><div><strong>Reconciled</strong><span>provider matching and reports</span></div></div>
@@ -221,7 +221,7 @@ export function App() {
     </section>
     <section className="workspace-shell" id="workspace" aria-label="Live demo workspace">
     {error && <div className="error" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError(null)}>×</button></div>}
-    <div className="workspace-top"><div className="workspace-heading"><p className="eyebrow">LIVE DEMO · v0.5.0</p><h2>Ledger workspace</h2><div className="sandbox-line"><p className="workspace-session"><span className={`status-dot ${session ? 'online' : ''}`} />{session ? 'Sandbox ready · private tenant' : error ? 'Sandbox unavailable' : 'Connecting to sandbox…'}</p><button className="secondary" disabled={busy} title={session ? 'Create a fresh private demo with new accounts and balances. You will lose access to this sandbox; its history is retained.' : 'Create a private demo tenant with sample accounts and balances.'} onClick={() => void bootstrap(true)}>{session ? 'New sandbox' : 'Start sandbox'}</button></div></div></div>
+    <div className="workspace-top"><div className="workspace-heading"><p className="eyebrow">LIVE DEMO · v0.6.0</p><h2>Ledger workspace</h2><div className="sandbox-line"><p className="workspace-session"><span className={`status-dot ${session ? 'online' : ''}`} />{session ? 'Sandbox ready · private tenant' : error ? 'Sandbox unavailable' : 'Connecting to sandbox…'}</p><button className="secondary" disabled={busy} title={session ? 'Create a fresh private demo with new accounts and balances. You will lose access to this sandbox; its history is retained.' : 'Create a private demo tenant with sample accounts and balances.'} onClick={() => void bootstrap(true)}>{session ? 'New sandbox' : 'Start sandbox'}</button></div></div></div>
     <div className="workspace-controls"><div className="workspace-ledger"><label htmlFor="workspace-ledger">Active ledger</label><select id="workspace-ledger" aria-label="Ledger" aria-describedby="ledger-currency-note" value={ledger} disabled={busy} onChange={e => { setLedger(e.target.value); setTxFilter(''); }}>{ledgers.map(l => <option value={l.id} key={l.id}>{l.name}</option>)}</select></div></div>
     <p className="ledger-currency-note" id="ledger-currency-note"><strong>Demo limitation:</strong> one currency per ledger (USD or EUR). The library supports mixed-currency accounts in one ledger, but each transaction or hold uses one currency. Cross-currency transfers and FX conversion are not available.</p>
     <nav className="tabs" aria-label="Workspace sections">{areas.map(name => <button key={name} aria-current={area === name ? 'page' : undefined} onClick={() => switchArea(name)}>{name}</button>)}</nav>
@@ -249,7 +249,7 @@ export function App() {
         {transactions.map(t => <button className={`transaction-row ${ids.tx === t.id ? 'selected' : ''}`} key={t.id} onClick={() => void inspectTransaction(t)}><div><strong>{t.description ?? t.reference}</strong><code>{t.reference}</code></div><span>{t.relation_type ?? 'POSTING'}</span><time>{new Date(t.effective_at).toLocaleString()}</time><span>↗</span></button>)}
         {!transactions.length && <p className="muted">No matching transactions.</p>}{txCursor && <button className="secondary" disabled={busy} onClick={() => void moreTransactions()}>Load more transactions</button>}
       </section>
-      {selectedTx && <section className="panel ledger"><div className="panel-title"><h2>How LuxLedger recorded it</h2><span>{selectedTx.reference}</span></div><p><code>{selectedTx.id}</code></p><p>Effective: {selectedTx.effective_at} · Created: {selectedTx.created_at}</p>
+      {selectedTx && <section className="panel ledger"><div className="panel-title"><h2>How Borecount recorded it</h2><span>{selectedTx.reference}</span></div><p><code>{selectedTx.id}</code></p><p>Effective: {selectedTx.effective_at} · Created: {selectedTx.created_at}</p>
         {selectedTx.related_transaction_id && <p>{selectedTx.relation_type} → <code>{selectedTx.related_transaction_id}</code></p>}
         {txEntries.map(e => { const d = toEntryDisplay(e.signed_amount_minor); return <div className="entry" key={e.id}><span className={`badge ${d?.direction.toLowerCase()}`}>{d?.direction}</span><strong>{accounts.find(a => a.id === e.account_id)?.name ?? e.account_id}</strong><span>{money(d?.magnitudeMinor ?? '0', e.currency, scale)}</span></div>; })}
         <p className="balanced">{entriesAreBalanced(txEntries) ? '✓ Debits and credits balance' : 'Loading entries…'}</p><details><summary>Metadata</summary><JsonBlock value={selectedTx.metadata} /></details>
@@ -312,6 +312,6 @@ export function App() {
         <div className="actions">{journal.request.path.startsWith('/v1/') && <button className="secondary" disabled={busy} onClick={() => void execute(journal.request)}>Repeat exact request</button>}{lastSent && <button className="text-button" disabled={busy} onClick={() => void execute(lastSent)}>Repeat last write</button>}</div><p className="muted">cURL uses $ACCESS_TOKEN. The browser keeps the sandbox token in memory; session credentials are HttpOnly. Financial requests and responses match the public API.</p>
       </> : <p className="muted">Requests appear here as you explore.</p>}</div></div></section>
     </section>
-    <footer><div className="brand"><span className="mark">L</span>LuxLedger</div><p>Open-source double-entry ledger infrastructure.</p><div><a href="/docs?demo=1" target="_blank" rel="noreferrer">API docs</a><a href="/openapi.yaml" target="_blank" rel="noreferrer">OpenAPI</a></div></footer>
+    <footer><div className="brand"><span className="mark">B</span>Borecount</div><p>Open-source double-entry ledger infrastructure.</p><div><a href="/docs?demo=1" target="_blank" rel="noreferrer">API docs</a><a href="/openapi.yaml" target="_blank" rel="noreferrer">OpenAPI</a></div></footer>
   </main>;
 }

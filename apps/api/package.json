@@ -1,5 +1,5 @@
 {
-  "name": "@luxledger/demo-api",
+  "name": "@borecount/demo-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,10 @@
     "reset:demo": "tsx src/reset-demo.ts"
   },
   "dependencies": {
-    "@luxledger/core": "0.5.0",
-    "@luxledger/fastify-routes": "0.5.0",
-    "@luxledger/http": "0.5.0",
-    "@luxledger/postgres-adapter": "0.5.0",
+    "@borecount/core": "0.6.0",
+    "@borecount/fastify-routes": "0.6.0",
+    "@borecount/http": "0.6.0",
+    "@borecount/postgres-adapter": "0.6.0",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
     "postgres": "3.4.8",

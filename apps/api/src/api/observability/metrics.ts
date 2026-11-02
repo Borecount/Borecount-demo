@@ -108,49 +108,49 @@ export class ApiMetrics {
   public renderPrometheus(): string {
     const lines: string[] = [];
 
-    lines.push('# HELP luxledger_http_requests_total Total HTTP requests by route and status.');
-    lines.push('# TYPE luxledger_http_requests_total counter');
+    lines.push('# HELP borecount_http_requests_total Total HTTP requests by route and status.');
+    lines.push('# TYPE borecount_http_requests_total counter');
     for (const series of getSortedCounterSeries(this.requestTotal)) {
-      lines.push(`luxledger_http_requests_total${formatLabels(series.labels)} ${series.value}`);
+      lines.push(`borecount_http_requests_total${formatLabels(series.labels)} ${series.value}`);
     }
 
     lines.push(
-      '# HELP luxledger_http_request_duration_seconds HTTP request latency in seconds by route and status.',
+      '# HELP borecount_http_request_duration_seconds HTTP request latency in seconds by route and status.',
     );
-    lines.push('# TYPE luxledger_http_request_duration_seconds histogram');
+    lines.push('# TYPE borecount_http_request_duration_seconds histogram');
     for (const series of getSortedHistogramSeries(this.requestDurationSeconds)) {
       for (let index = 0; index < REQUEST_DURATION_BUCKETS_SECONDS.length; index += 1) {
         lines.push(
-          `luxledger_http_request_duration_seconds${formatLabels({
+          `borecount_http_request_duration_seconds${formatLabels({
             ...series.labels,
             le: String(REQUEST_DURATION_BUCKETS_SECONDS[index]),
           })} ${series.bucketCounts[index]}`,
         );
       }
       lines.push(
-        `luxledger_http_request_duration_seconds${formatLabels({ ...series.labels, le: '+Inf' })} ${series.count}`,
+        `borecount_http_request_duration_seconds${formatLabels({ ...series.labels, le: '+Inf' })} ${series.count}`,
       );
       lines.push(
-        `luxledger_http_request_duration_seconds_sum${formatLabels(series.labels)} ${series.sum}`,
+        `borecount_http_request_duration_seconds_sum${formatLabels(series.labels)} ${series.sum}`,
       );
       lines.push(
-        `luxledger_http_request_duration_seconds_count${formatLabels(series.labels)} ${series.count}`,
+        `borecount_http_request_duration_seconds_count${formatLabels(series.labels)} ${series.count}`,
       );
     }
 
-    lines.push('# HELP luxledger_auth_failures_total Auth failures by route and status.');
-    lines.push('# TYPE luxledger_auth_failures_total counter');
+    lines.push('# HELP borecount_auth_failures_total Auth failures by route and status.');
+    lines.push('# TYPE borecount_auth_failures_total counter');
     for (const series of getSortedCounterSeries(this.authFailuresTotal)) {
-      lines.push(`luxledger_auth_failures_total${formatLabels(series.labels)} ${series.value}`);
+      lines.push(`borecount_auth_failures_total${formatLabels(series.labels)} ${series.value}`);
     }
 
     lines.push(
-      '# HELP luxledger_token_issuance_failures_total Failed access token issuance attempts by status.',
+      '# HELP borecount_token_issuance_failures_total Failed access token issuance attempts by status.',
     );
-    lines.push('# TYPE luxledger_token_issuance_failures_total counter');
+    lines.push('# TYPE borecount_token_issuance_failures_total counter');
     for (const series of getSortedCounterSeries(this.tokenIssuanceFailuresTotal)) {
       lines.push(
-        `luxledger_token_issuance_failures_total${formatLabels(series.labels)} ${series.value}`,
+        `borecount_token_issuance_failures_total${formatLabels(series.labels)} ${series.value}`,
       );
     }
 
