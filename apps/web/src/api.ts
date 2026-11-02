@@ -7,7 +7,7 @@ export type Ledger = Contract.Ledger;
 export type Account = Contract.Account;
 export type Entry = Contract.EntriesPage['data'][number];
 export type Transaction = Contract.Transaction;
-export interface Hold { id: string; reference: string; description: string | null; state: string; original_amount_minor: string; remaining_amount_minor: string; }
+export type Hold = Contract.HoldSummary;
 export interface Session { access_token: string; expires_in: number; tenant_id: string; session_expires_at: string; assets: { code: string; scale: number }[]; }
 export type Balance = Contract.BalanceAsOfResponse;
 export class DemoApiError extends Error {

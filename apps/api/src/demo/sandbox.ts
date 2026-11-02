@@ -102,33 +102,4 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     return reply.code(201).send(await payload(row));
   });
 
-  server.get<{ Querystring: { ledger_id: string; cursor?: string; limit?: number } }>('/demo/session/holds', {
-    schema: { querystring: { type: 'object', additionalProperties: false, required: ['ledger_id'], properties: {
-      ledger_id: { type: 'string', format: 'uuid' }, cursor: { type: 'string', minLength: 1, maxLength: 2048 },
-      limit: { type: 'integer', minimum: 1, maximum: 200, default: 25 },
-    } } },
-  }, async (request, reply) => {
-    reply.header('cache-control', 'no-store');
-    const row = await session(request);
-    const { ledger_id, cursor, limit = 25 } = request.query;
-    const page = await services.holds.list({
-      tenantId: row.tenant_id,
-      limit,
-      ...(cursor === undefined ? {} : { cursor }),
-      where: { ledgerId: { eq: ledger_id } },
-    });
-    return {
-      data: page.data.map(hold => ({
-        id: hold.id,
-        ledger_id: hold.ledgerId,
-        reference: hold.reference,
-        description: hold.description,
-        state: hold.state,
-        original_amount_minor: hold.originalAmountMinor.toString(),
-        remaining_amount_minor: hold.remainingAmountMinor.toString(),
-        created_at: hold.createdAt.toISOString(),
-      })),
-      next_cursor: page.nextCursor,
-    };
-  });
 }

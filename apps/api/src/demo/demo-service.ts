@@ -4,9 +4,18 @@ import {
   HoldNotFoundError,
   type ApplicationServices,
   type HoldSummary,
+  type HoldListQuery,
 } from '@borecount/core/application';
 import { OverdraftPolicy, type AccountEntity } from '@borecount/core/account';
 import type { DbClient } from '@borecount/postgres-adapter';
+import { DEFAULT_PAGE_LIMIT } from '@borecount/http/contracts';
+import { toHoldSummaryResponse, toPaginatedResponse } from '@borecount/http/mappers';
+
+export interface DemoStateQuery {
+  limit?: number;
+  cursor?: string;
+  where?: Omit<NonNullable<HoldListQuery['where']>, 'ledgerId'>;
+}
 
 const LEDGER_NAME = 'Borecount transfer demo';
 const CURRENCY = 'USD';
@@ -43,42 +52,21 @@ export class DemoService {
     },
   ) {}
 
-  async getState(holdsCursor?: string, completedHoldsCursor?: string) {
+  async getState(query: DemoStateQuery = {}) {
     const { tenantId, ledgerId } = await this.context();
     const accounts = await this.accounts(tenantId, ledgerId);
     const addresses = new Map(accounts.map((account) => [account.id, account.name]));
     const transactions = await this.services.transactions.list({ tenantId, ledgerId, limit: 100 });
 
-    // Keep every response bounded and cursorable; completed history is fetched oldest-first.
-    const [activeHolds, completedHolds] = await Promise.all([
-      this.services.holds.list({
-        tenantId,
-        limit: 25,
-        ...(holdsCursor === undefined ? {} : { cursor: holdsCursor }),
-        where: { ledgerId: { eq: ledgerId }, state: { eq: 'HELD' } },
-      }),
-      this.services.holds.list({
-        tenantId,
-        limit: 100,
-        ...(completedHoldsCursor === undefined ? {} : { cursor: completedHoldsCursor }),
-        where: { ledgerId: { eq: ledgerId }, state: { ne: 'HELD' } },
-      }),
-    ]);
-    const holds = [...activeHolds.data, ...completedHolds.data]
-      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id))
-      .map(hold => ({
-        id: hold.id,
-        reference: hold.reference,
-        description: hold.description,
-        state: hold.state,
-        original_amount_minor: hold.originalAmountMinor.toString(),
-        remaining_amount_minor: hold.remainingAmountMinor.toString(),
-      }));
+    const holds = await this.services.holds.list({
+      tenantId,
+      limit: query.limit ?? DEFAULT_PAGE_LIMIT,
+      cursor: query.cursor,
+      where: { ...query.where, ledgerId: { eq: ledgerId } },
+    });
     const trial = await this.services.balances.getTrialBalance({ tenantId, ledgerId });
     return {
-      holds,
-      active_holds_next_cursor: activeHolds.nextCursor,
-      completed_holds_next_cursor: completedHolds.nextCursor,
+      holds: toPaginatedResponse(holds, toHoldSummaryResponse),
       trial_balance: { debits_minor: trial.totalDebitsMinor.toString(),
         credits_minor: trial.totalCreditsMinor.toString() },
       transactions_limited: transactions.nextCursor !== null,

@@ -48,12 +48,13 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   const partial = (await call('POST', `/v1/holds/${hold.hold_id}/commit`, { reference: 'sandbox-capture', amount_minor: '1000' }, 201)).body;
   assert.equal(partial.remaining_amount_minor, '1500');
   await call('POST', `/v1/holds/${hold.hold_id}/void`, undefined, 200);
-  const holds = (await call('GET', `/demo/session/holds?ledger_id=${ledger.id}`, undefined, 200)).body;
+  const holdWhere = encodeURIComponent(JSON.stringify({ ledger_id: { eq: ledger.id } }));
+  const holds = (await call('GET', `/v1/holds?where=${holdWhere}`, undefined, 200)).body;
   assert.equal(holds.data[0].state, 'VOIDED');
   assert.equal(typeof holds.data[0].created_at, 'string');
   assert.equal(holds.data[0].original_amount_minor, '2500');
   assert.deepEqual(
-    (await call('GET', `/demo/session/holds?ledger_id=${eurLedger.id}`, undefined, 200)).body.data,
+    (await call('GET', `/v1/holds?where=${encodeURIComponent(JSON.stringify({ ledger_id: { eq: eurLedger.id } }))}`, undefined, 200)).body.data,
     [],
   );
   const invalid = tx('bulk-bad'); invalid.entries[1].signed_amount_minor = '-2499';
@@ -85,11 +86,11 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   assert.ok(preview.items.length);
   await call('POST', '/v1/credit-grants/expiration/run', { as_of, limit: 25 }, 200);
   await call('POST', `/v1/holds/${reserved.hold_id}/void`, undefined, 200);
-  const firstHoldPage = (await call('GET', `/demo/session/holds?ledger_id=${ledger.id}&limit=1`, undefined, 200)).body;
+  const firstHoldPage = (await call('GET', `/v1/holds?where=${holdWhere}&limit=1`, undefined, 200)).body;
   assert.equal(firstHoldPage.data.length, 1);
   assert.ok(firstHoldPage.next_cursor);
   assert.doesNotMatch(firstHoldPage.next_cursor, /^[0-9a-f]{8}-[0-9a-f]{4}-/i);
-  const nextHoldPage = (await call('GET', `/demo/session/holds?ledger_id=${ledger.id}&limit=1&cursor=${encodeURIComponent(firstHoldPage.next_cursor)}`, undefined, 200)).body;
+  const nextHoldPage = (await call('GET', `/v1/holds?where=${holdWhere}&limit=1&cursor=${encodeURIComponent(firstHoldPage.next_cursor)}`, undefined, 200)).body;
   assert.equal(nextHoldPage.data.length, 1);
   assert.notEqual(firstHoldPage.data[0].id, nextHoldPage.data[0].id);
   await call('POST', '/v1/credit-grants/expiration/run', { as_of, limit: 25 }, 200);
@@ -122,7 +123,7 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   token = second.access_token; assert.notEqual(second.tenant_id, first.tenant_id);
   await call('GET', `/v1/accounts/${id('wallet:alice')}`, undefined, 404);
   await call('POST', `/v1/holds/${hold.hold_id}/void`, undefined, 404);
-  assert.equal((await call('GET', `/demo/session/holds?ledger_id=${ledger.id}`, undefined, 200)).body.data.length, 0);
+  assert.equal((await call('GET', `/v1/holds?where=${holdWhere}`, undefined, 200)).body.data.length, 0);
   cookie = firstCookie; token = firstToken;
   const reset = (await call('POST', '/demo/session', undefined, 201)).body;
   assert.notEqual(reset.tenant_id, first.tenant_id);

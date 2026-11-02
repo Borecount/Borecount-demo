@@ -63,6 +63,7 @@ export function App() {
   const [ledgers, setLedgers] = useState<Ledger[]>([]), [ledger, setLedger] = useState(''), [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]), [txCursor, setTxCursor] = useState<string | null>(null), [txFilter, setTxFilter] = useState('');
   const [holds, setHolds] = useState<Hold[]>([]), [holdCursor, setHoldCursor] = useState<string | null>(null);
+  const [holdState, setHoldState] = useState<Hold['state'] | ''>('');
   const [ids, setIds] = useState(initialIds), [selectedAccount, setSelectedAccount] = useState(''), [balance, setBalance] = useState<Balance | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null), [txEntries, setTxEntries] = useState<Entry[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -82,6 +83,7 @@ export function App() {
   const currency = accounts[0]?.currency ?? (ledgers.find(l => l.id === ledger)?.name.startsWith('EUR') ? 'EUR' : 'USD');
   const scale = session?.assets.find(a => a.code === currency)?.scale ?? 2;
   const context: Context = { ledger, currency, accounts, ...ids, expirationAsOf };
+  const holdWhere = JSON.stringify({ ledger_id: { eq: ledger }, ...(holdState ? { state: { eq: holdState } } : {}) });
   const journal = records.find(r => r.id === recordId) ?? records[0];
 
   useEffect(() => observeRequests(record => { setRecords(old => [record, ...old].slice(0, 150)); if (record.foreground) setRecordId(record.id); }), []);
@@ -116,7 +118,7 @@ export function App() {
       [a, t, h] = await Promise.all([
         allPages<Account>(query('/v1/accounts', { ledger_id: ledger, limit: 200 })),
         request<Page<Transaction>>({ method: 'GET', path: query('/v1/transactions', { ledger_id: ledger, limit: 10, ...(txFilter ? { where: pretty({ reference: { eq: txFilter } }) } : {}) }) }),
-        request<Page<Hold>>({ method: 'GET', path: query('/demo/session/holds', { ledger_id: ledger, limit: 25 }) }),
+        request<Page<Hold>>({ method: 'GET', path: query('/v1/holds', { where: holdWhere }) }),
       ]);
     } catch (e) { if (version !== refreshVersion.current) return; throw e; }
     if (version !== refreshVersion.current) return;
@@ -125,7 +127,7 @@ export function App() {
     setFrom(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_PRIMARY' || x.name === 'wallet:alice')?.name ?? '');
     setTo(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_SECONDARY' || x.name === 'wallet:bob')?.name ?? '');
     return a;
-  }, [ledger, txFilter]);
+  }, [ledger, txFilter, holdWhere]);
   refreshRef.current = refresh;
   useEffect(() => { setAccounts([]); setTransactions([]); setHolds([]); setSelectedAccount(''); setBalance(null); setIds(initialIds); setExpirationAsOf(''); setSelectedTx(null); setTxEntries([]); setPreset(null); setBeforeAfter(null); setLastSent(null); setReference(ref()); }, [ledger]);
   useEffect(() => { void refresh().catch(e => setError(describe(e))); }, [refresh]);
@@ -221,7 +223,7 @@ export function App() {
     </section>
     <section className="workspace-shell" id="workspace" aria-label="Live demo workspace">
     {error && <div className="error" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError(null)}>×</button></div>}
-    <div className="workspace-top"><div className="workspace-heading"><p className="eyebrow">LIVE DEMO · v0.6.0</p><h2>Ledger workspace</h2><div className="sandbox-line"><p className="workspace-session"><span className={`status-dot ${session ? 'online' : ''}`} />{session ? 'Sandbox ready · private tenant' : error ? 'Sandbox unavailable' : 'Connecting to sandbox…'}</p><button className="secondary" disabled={busy} title={session ? 'Create a fresh private demo with new accounts and balances. You will lose access to this sandbox; its history is retained.' : 'Create a private demo tenant with sample accounts and balances.'} onClick={() => void bootstrap(true)}>{session ? 'New sandbox' : 'Start sandbox'}</button></div></div></div>
+    <div className="workspace-top"><div className="workspace-heading"><p className="eyebrow">LIVE DEMO · v0.7.0</p><h2>Ledger workspace</h2><div className="sandbox-line"><p className="workspace-session"><span className={`status-dot ${session ? 'online' : ''}`} />{session ? 'Sandbox ready · private tenant' : error ? 'Sandbox unavailable' : 'Connecting to sandbox…'}</p><button className="secondary" disabled={busy} title={session ? 'Create a fresh private demo with new accounts and balances. You will lose access to this sandbox; its history is retained.' : 'Create a private demo tenant with sample accounts and balances.'} onClick={() => void bootstrap(true)}>{session ? 'New sandbox' : 'Start sandbox'}</button></div></div></div>
     <div className="workspace-controls"><div className="workspace-ledger"><label htmlFor="workspace-ledger">Active ledger</label><select id="workspace-ledger" aria-label="Ledger" aria-describedby="ledger-currency-note" value={ledger} disabled={busy} onChange={e => { setLedger(e.target.value); setTxFilter(''); }}>{ledgers.map(l => <option value={l.id} key={l.id}>{l.name}</option>)}</select></div></div>
     <p className="ledger-currency-note" id="ledger-currency-note"><strong>Demo limitation:</strong> one currency per ledger (USD or EUR). The library supports mixed-currency accounts in one ledger, but each transaction or hold uses one currency. Cross-currency transfers and FX conversion are not available.</p>
     <nav className="tabs" aria-label="Workspace sections">{areas.map(name => <button key={name} aria-current={area === name ? 'page' : undefined} onClick={() => switchArea(name)}>{name}</button>)}</nav>
@@ -256,9 +258,12 @@ export function App() {
       </section>}
     </>}
 
-    {area === 'Holds' && <section className="panel" aria-label="Transfer holds"><div className="panel-title"><h2>Payment authorizations</h2><span>25 per page</span></div>
-      {!holds.length && <p>No holds yet. Reserve a payment to begin.</p>}{holds.map(h => <article className={`hold-row ${ids.hold === h.id ? 'selected' : ''}`} key={h.id}><div><strong>{h.description ?? h.reference}</strong><code>{h.reference}</code></div><span className="badge">{h.state}</span><span>{money(h.original_amount_minor, currency, scale)} / remaining {money(h.remaining_amount_minor, currency, scale)}</span><button className="secondary" onClick={() => setIds(old => ({ ...old, hold: h.id }))}>Select hold</button></article>)}
-      {holdCursor && <button className="secondary" disabled={busy} onClick={async () => { const result = await execute({ method: 'GET', path: query('/demo/session/holds', { ledger_id: ledger, limit: 25, cursor: holdCursor }) }); if (result) { const p = result as unknown as Page<Hold>; setHolds(old => [...old, ...p.data]); setHoldCursor(p.next_cursor); } }}>Load more holds</button>}
+    {area === 'Holds' && <section className="panel" aria-label="Transfer holds"><div className="panel-title"><h2>Payment authorizations</h2><span>50 per page</span></div>
+      <label>Hold state<select disabled={busy} value={holdState} onChange={e => { setHoldState(e.target.value as Hold['state'] | ''); setHolds([]); setHoldCursor(null); setIds(old => ({ ...old, hold: '' })); }}>
+        <option value="">All states</option><option value="HELD">Active (HELD)</option><option value="APPLIED">Applied (APPLIED)</option><option value="VOIDED">Voided (VOIDED)</option>
+      </select></label>
+      {!holds.length && <p>{holdState ? 'No holds match this state.' : 'No holds yet. Reserve a payment to begin.'}</p>}{holds.map(h => <article className={`hold-row ${ids.hold === h.id ? 'selected' : ''}`} key={h.id}><div><strong>{h.description ?? h.reference}</strong><code>{h.reference}</code></div><span className="badge">{h.state}</span><span>{money(h.original_amount_minor, currency, scale)} / remaining {money(h.remaining_amount_minor, currency, scale)}</span><button className="secondary" onClick={() => setIds(old => ({ ...old, hold: h.id }))}>Select hold</button></article>)}
+      {holdCursor && <button className="secondary" disabled={busy} onClick={async () => { const result = await execute({ method: 'GET', path: query('/v1/holds', { where: holdWhere, cursor: holdCursor }) }); if (result) { const p = result as unknown as Page<Hold>; setHolds(old => [...old, ...p.data]); setHoldCursor(p.next_cursor); } }}>Load more holds</button>}
       <p>Selected hold: <code>{ids.hold || 'Create or select one'}</code></p>
     </section>}
 
