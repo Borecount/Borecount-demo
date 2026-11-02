@@ -13,10 +13,10 @@
     "reset:demo": "tsx src/reset-demo.ts"
   },
   "dependencies": {
-    "@borecount/core": "0.6.0",
-    "@borecount/fastify-routes": "0.6.0",
-    "@borecount/http": "0.6.0",
-    "@borecount/postgres-adapter": "0.6.0",
+    "@borecount/core": "0.7.0",
+    "@borecount/fastify-routes": "0.7.0",
+    "@borecount/http": "0.7.0",
+    "@borecount/postgres-adapter": "0.7.0",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
     "postgres": "3.4.8",

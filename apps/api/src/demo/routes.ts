@@ -1,5 +1,9 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { DemoInputError, DemoNotReadyError, type DemoService } from './demo-service';
+import { holdFilterFields, invalidWhereError, readWhereParameter } from '@borecount/http';
+import { listHoldsQuerySchema, type ListHoldsQuery } from '@borecount/http/contracts';
+import { DemoInputError, DemoNotReadyError, type DemoService, type DemoStateQuery } from './demo-service';
+
+const { ledger_id: _ledgerId, ...stateHoldFilterFields } = holdFilterFields;
 
 const handleError = (reply: FastifyReply, error: unknown) => {
   if (error instanceof DemoInputError || error instanceof DemoNotReadyError) {
@@ -13,14 +17,13 @@ export const registerDemoRoutes = (
   demo: DemoService,
   options: { resetEnabled: boolean },
 ): void => {
-  server.get<{ Querystring: { holds_cursor?: string; completed_holds_cursor?: string } }>('/demo/state', {
-    schema: { querystring: { type: 'object', additionalProperties: false, properties: {
-      holds_cursor: { type: 'string', minLength: 1, maxLength: 2048 },
-      completed_holds_cursor: { type: 'string', minLength: 1, maxLength: 2048 },
-    } } },
+  server.get<{ Querystring: ListHoldsQuery }>('/demo/state', {
+    schema: { querystring: listHoldsQuerySchema },
   }, async (request, reply) => {
     try {
-      return await demo.getState(request.query.holds_cursor, request.query.completed_holds_cursor);
+      const where = readWhereParameter<DemoStateQuery['where']>(request.raw.url ?? '', stateHoldFilterFields);
+      if (where === null) throw invalidWhereError();
+      return await demo.getState({ limit: request.query.limit, cursor: request.query.cursor, where });
     } catch (error) {
       return handleError(reply, error);
     }

@@ -61,16 +61,83 @@ test('hold guide reserves, partially captures and releases the remainder', async
   await ready(page);
   await page.getByRole('button', { name: /Authorization & capture.*Reserve/ }).click();
   await page.getByRole('button', { name: 'Send request', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Transfer holds' })).toContainText('HELD');
+  await expect(page.getByRole('region', { name: 'Transfer holds' }).locator('.hold-row')).toContainText('HELD');
   await page.getByRole('button', { name: 'Next step →' }).click();
   await page.getByRole('button', { name: 'Send request', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Transfer holds' })).toContainText('remaining 15.00 USD');
+  await expect(page.getByRole('region', { name: 'Transfer holds' }).locator('.hold-row')).toContainText('remaining 15.00 USD');
   await page.getByRole('button', { name: 'Next step →' }).click();
   await page.getByRole('button', { name: 'Send request', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Transfer holds' })).toContainText('VOIDED');
+  await expect(page.getByRole('region', { name: 'Transfer holds' }).locator('.hold-row')).toContainText('VOIDED');
   await tab(page, 'Accounts');
   await expect(page.getByTestId('account-wallet:alice')).toContainText('90.00 USD');
   await expect(page.getByTestId('available-balance')).toContainText('90.00 USD');
+});
+
+test('holds use one public cursor list with state filters that start without a cursor', async ({ page }) => {
+  const holdListRequests: string[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === '/v1/holds') holdListRequests.push(url.href);
+  });
+
+  await ready(page);
+  await tab(page, 'Holds');
+  const stateFilter = page.getByLabel('Hold state');
+  await expect(stateFilter).toHaveValue('');
+  await expect(stateFilter.locator('option')).toHaveText([
+    'All states',
+    'Active (HELD)',
+    'Applied (APPLIED)',
+    'Voided (VOIDED)',
+  ]);
+  await expect(page.getByRole('region', { name: 'Transfer holds' })).toHaveCount(1);
+
+  await expect.poll(() => holdListRequests.length).toBeGreaterThan(0);
+  await preset(page, 'Reserve payment');
+  const rows = page.getByRole('region', { name: 'Transfer holds' }).locator('.hold-row');
+  await expect(rows).toHaveCount(1);
+  await preset(page, 'Void remaining');
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('VOIDED');
+  await preset(page, 'Reserve payment');
+  await expect(rows).toHaveCount(2);
+
+  const ledgerId = await page.getByLabel('Ledger').inputValue();
+  const assertHoldQuery = (urlText: string, state?: string) => {
+    const url = new URL(urlText);
+    expect(url.pathname).toBe('/v1/holds');
+    expect(url.searchParams.has('cursor')).toBe(false);
+    expect(JSON.parse(url.searchParams.get('where') ?? '{}')).toEqual({
+      ledger_id: { eq: ledgerId },
+      ...(state === undefined ? {} : { state: { eq: state } }),
+    });
+  };
+  assertHoldQuery(holdListRequests.at(-1)!);
+
+  for (const [value, state, count] of [
+    ['HELD', 'HELD', 1],
+    ['APPLIED', 'APPLIED', 0],
+    ['VOIDED', 'VOIDED', 1],
+    ['', undefined, 2],
+  ] as const) {
+    const responsePromise = page.waitForResponse(response => {
+      const request = response.request();
+      return request.method() === 'GET' && new URL(response.url()).pathname === '/v1/holds';
+    });
+    await stateFilter.selectOption(value);
+    expect((await responsePromise).status()).toBe(200);
+    await expect(rows).toHaveCount(count);
+    if (state !== undefined && count > 0) await expect(rows.first()).toContainText(state);
+    await expect.poll(() => {
+      try {
+        const url = new URL(holdListRequests.at(-1)!);
+        return JSON.parse(url.searchParams.get('where') ?? '{}').state?.eq ?? '';
+      } catch {
+        return '';
+      }
+    }).toBe(state ?? '');
+    assertHoldQuery(holdListRequests.at(-1)!, state);
+  }
 });
 
 test('credits expose grant issuance, consumption, partial refunds and lineage', async ({ page }) => {
