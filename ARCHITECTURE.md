@@ -1,6 +1,6 @@
-# LuxLedger Demo Architecture
+# Borecount Demo Architecture
 
-This repository is a composition root, not a second implementation of ledger rules. Its purpose is to show how the published LuxLedger packages become a deployable HTTP service.
+This repository is a composition root, not a second implementation of ledger rules. Its purpose is to show how the published Borecount packages become a deployable HTTP service.
 
 ## Boundaries and dependency direction
 
@@ -10,18 +10,18 @@ client
   ▼
 demo API (apps/api/src/index.ts, apps/api/src/api/*)
   ├─ process lifecycle, configuration, auth/rate-limit hooks, probes, metrics
-  └─ registers @luxledger/fastify-routes
+  └─ registers @borecount/fastify-routes
                 │ validates/translates transport
                 ▼
-          @luxledger/http
+          @borecount/http
           route specs, schemas, DTO contracts, error serialization
                 │
                 ▼
-          @luxledger/core
+          @borecount/core
           entities, invariants, use-case services, repository ports
                 ▲
                 │ implements ports
-     @luxledger/postgres-adapter
+     @borecount/postgres-adapter
      Drizzle repositories, schema, PostgreSQL transaction/tenant context
                 │
                 ▼
@@ -30,11 +30,11 @@ demo API (apps/api/src/index.ts, apps/api/src/api/*)
 
 - **Core boundary:** ledger invariants and application workflows. It has no Fastify or PostgreSQL concern.
 - **HTTP boundary:** canonical transport contracts and route specifications. Request/response DTOs must not be redefined in this app.
-- **Fastify boundary:** binds the HTTP route specifications to core services and maps Fastify requests/replies. LuxLedger also publishes an Express adapter, but this demo registers exactly one framework adapter: Fastify.
+- **Fastify boundary:** binds the HTTP route specifications to core services and maps Fastify requests/replies. Borecount also publishes an Express adapter, but this demo registers exactly one framework adapter: Fastify.
 - **PostgreSQL boundary:** persists tenants, keys, ledgers, accounts, entries, holds, snapshots, and reconciliation data; implements repository ports with Drizzle.
 - **Demo boundary:** environment parsing, dependency wiring, authentication hooks, in-process rate limiting/metrics, public documentation routes, and process shutdown.
 
-Changes to business rules belong in the relevant LuxLedger package. Demo code should remain wiring or operations code unless a demo-specific defect is proven.
+Changes to business rules belong in the relevant Borecount package. Demo code should remain wiring or operations code unless a demo-specific defect is proven.
 
 ## Reference application layer
 

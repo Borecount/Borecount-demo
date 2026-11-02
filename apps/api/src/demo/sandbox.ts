@@ -1,13 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { AccountSide, ApiKeyRole, UnauthorizedError, type ApplicationServices } from '@luxledger/core/application';
-import { OverdraftPolicy } from '@luxledger/core/account';
-import type { DbClient } from '@luxledger/postgres-adapter';
+import { AccountSide, ApiKeyRole, UnauthorizedError, type ApplicationServices } from '@borecount/core/application';
+import { OverdraftPolicy } from '@borecount/core/account';
+import type { DbClient } from '@borecount/postgres-adapter';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import { RateLimitExceededError } from '../api/errors';
 
-const COOKIE = 'luxledger_sandbox';
+const COOKIE = 'borecount_sandbox';
 const SESSION_SECONDS = 8 * 60 * 60;
 const sandboxProfiles = {
   USD: { openingMinor: 10000n, names: { funding: 'system:funding', primary: 'wallet:alice', secondary: 'wallet:bob', fees: 'platform:fees', credits: 'credits:alice', usage: 'service:usage' } },

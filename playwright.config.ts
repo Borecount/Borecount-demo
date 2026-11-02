@@ -17,7 +17,7 @@ export default defineConfig({
       timeout: 20_000,
     },
     {
-      command: 'npm run dev:test -w @luxledger/demo-web',
+      command: 'npm run dev:test -w @borecount/demo-web',
       url: 'http://127.0.0.1:5174',
       reuseExistingServer: false,
       timeout: 20_000,

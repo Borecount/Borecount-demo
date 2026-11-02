@@ -1,6 +1,6 @@
 // Compose the released ledger schema with the host-owned sandbox lifecycle table.
-export * from '@luxledger/postgres-adapter/schema';
-import { apiKeys, tenants } from '@luxledger/postgres-adapter/schema';
+export * from '@borecount/postgres-adapter/schema';
+import { apiKeys, tenants } from '@borecount/postgres-adapter/schema';
 import { index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 export const demoSessions = pgTable('demo_sessions', {

@@ -170,7 +170,7 @@ test('new sandbox and EUR selection preserve independent balances; mobile fits',
   await expect(page.getByRole('heading', { name: 'Explore real ledger flows.' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Workspace sections' }).getByRole('button', { name: 'Overview' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: '/tmp/luxledger-mobile.png', fullPage: true });
+  await page.screenshot({ path: '/tmp/borecount-mobile.png', fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.screenshot({ path: '/tmp/luxledger-overview.png', fullPage: true });
+  await page.screenshot({ path: '/tmp/borecount-overview.png', fullPage: true });
 });

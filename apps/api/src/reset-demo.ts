@@ -1,4 +1,4 @@
-import { createApplicationServices, createDbClient } from '@luxledger/postgres-adapter';
+import { createApplicationServices, createDbClient } from '@borecount/postgres-adapter';
 import { DemoService } from './demo/demo-service';
 import { isMainModule } from './utils/is-main-module';
 

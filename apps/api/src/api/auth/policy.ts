@@ -2,7 +2,7 @@ import { parseIntegerWithinRange } from '../../utils/parse-integer-with-range';
 import type { JwtAuthConfig } from './jwt';
 
 export const MIN_JWT_SIGNING_KEY_BYTES = 32;
-export const DEFAULT_JWT_ISSUER = 'luxledger-api';
+export const DEFAULT_JWT_ISSUER = 'borecount-api';
 export const DEFAULT_JWT_CLOCK_SKEW_SECONDS = 5;
 export const MAX_JWT_CLOCK_SKEW_SECONDS = 60;
 export const MIN_JWT_ACCESS_TTL_SECONDS = 300;

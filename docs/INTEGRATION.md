@@ -1,6 +1,6 @@
 # Integration Guide
 
-The checked-in [OpenAPI document](../openapi/openapi.yaml) is a byte-for-byte copy of the canonical [`@luxledger/http` OpenAPI document](https://github.com/Crusader4Christ/LuxLedger/blob/main/packages/http/openapi/openapi.yaml). This guide records conventions that are easy to miss when reading individual operations. Released package versions plus their executable tests define runtime behavior; repository documentation must not be used to infer unreleased features.
+The checked-in [OpenAPI document](../openapi/openapi.yaml) is a byte-for-byte copy of the canonical [`@borecount/http` OpenAPI document](https://github.com/Borecount/Borecount/blob/main/packages/http/openapi/openapi.yaml). This guide records conventions that are easy to miss when reading individual operations. Released package versions plus their executable tests define runtime behavior; repository documentation must not be used to infer unreleased features.
 
 ## Authentication and roles
 

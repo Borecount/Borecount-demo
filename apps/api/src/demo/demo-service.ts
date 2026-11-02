@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { AccountSide, type ApplicationServices } from '@luxledger/core/application';
-import { OverdraftPolicy, type AccountEntity } from '@luxledger/core/account';
-import type { DbClient } from '@luxledger/postgres-adapter';
+import { AccountSide, type ApplicationServices } from '@borecount/core/application';
+import { OverdraftPolicy, type AccountEntity } from '@borecount/core/account';
+import type { DbClient } from '@borecount/postgres-adapter';
 
-const LEDGER_NAME = 'LuxLedger transfer demo';
+const LEDGER_NAME = 'Borecount transfer demo';
 const CURRENCY = 'USD';
 const FUNDING_ADDRESS = 'system:funding';
 const ADDRESS_PATTERN = /^[a-z][a-z0-9]*(?::[a-z][a-z0-9-]*)+$/;
