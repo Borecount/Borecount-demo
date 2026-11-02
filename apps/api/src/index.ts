@@ -1,8 +1,6 @@
 import { parseJwtAuthConfig } from '@api/auth/policy';
 import { parseRateLimitConfig } from '@api/rate-limit/policy';
 import { createServerCore, registerApplication } from '@api/server';
-import { DemoService } from './demo/demo-service';
-import { registerDemoRoutes } from './demo/routes';
 import { registerSandbox } from './demo/sandbox';
 import { isMainModule } from './utils/is-main-module';
 import { createApplicationServices, createDbClient } from '@borecount/postgres-adapter';
@@ -44,20 +42,13 @@ export const run = async (): Promise<void> => {
     logger: true,
   });
   const services = createApplicationServices(dbClient);
+  const jwtAuth = parseJwtAuthConfig(process.env);
   registerApplication(server, {
     services,
-    jwtAuth: parseJwtAuthConfig(process.env),
+    jwtAuth,
     rateLimit: parseRateLimitConfig(process.env),
   });
-  const resetEnabled = process.env.NODE_ENV !== 'production';
-  const demo = new DemoService(dbClient, services, {
-    adminApiKey: process.env.BOOTSTRAP_ADMIN_API_KEY ?? '',
-    adminKeyName: process.env.BOOTSTRAP_ADMIN_KEY_NAME ?? 'Initial admin key',
-    tenantName: process.env.BOOTSTRAP_TENANT_NAME ?? 'Demo tenant',
-    resetEnabled,
-  });
-  if (resetEnabled) registerDemoRoutes(server, demo, { resetEnabled });
-  registerSandbox(server, dbClient, services, parseJwtAuthConfig(process.env));
+  registerSandbox(server, dbClient, services, jwtAuth);
   const port = parsePort(process.env.PORT);
   const shutdownTimeoutMs = parseShutdownTimeout(process.env.SHUTDOWN_TIMEOUT_MS);
 

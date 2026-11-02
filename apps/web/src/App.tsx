@@ -123,9 +123,9 @@ export function App() {
     } catch (e) { if (version !== refreshVersion.current) return; throw e; }
     if (version !== refreshVersion.current) return;
     setAccounts(a); setTransactions(t.data); setTxCursor(t.next_cursor); setHolds(h.data); setHoldCursor(h.next_cursor);
-    setSelectedAccount(old => a.some(x => x.id === old) ? old : a.find(x => x.code === 'DEMO_PRIMARY' || x.name === 'wallet:alice')?.id ?? a[0]?.id ?? '');
-    setFrom(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_PRIMARY' || x.name === 'wallet:alice')?.name ?? '');
-    setTo(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_SECONDARY' || x.name === 'wallet:bob')?.name ?? '');
+    setSelectedAccount(old => a.some(x => x.id === old) ? old : a.find(x => x.code === 'DEMO_PRIMARY')?.id ?? a[0]?.id ?? '');
+    setFrom(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_PRIMARY')?.name ?? '');
+    setTo(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_SECONDARY')?.name ?? '');
     return a;
   }, [ledger, txFilter, holdWhere]);
   refreshRef.current = refresh;

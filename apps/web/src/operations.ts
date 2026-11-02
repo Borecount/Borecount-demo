@@ -3,9 +3,8 @@ export type Area = 'Accounts' | 'Transactions' | 'Holds' | 'Credits' | 'Reconcil
 export interface Context { ledger: string; currency: string; accounts: Account[]; tx: string; hold: string; grant: string; upload: string; rule: string; run: string; expirationAsOf: string; }
 export interface Operation { id: string; area: Area; title: string; help: string; build: (c: Context, ref: string) => DemoRequest; }
 type SeedRole = 'funding' | 'primary' | 'secondary' | 'fees' | 'credits' | 'usage';
-const legacyNames: Record<SeedRole, string> = { funding: 'system:funding', primary: 'wallet:alice', secondary: 'wallet:bob', fees: 'platform:fees', credits: 'credits:alice', usage: 'service:usage' };
 const account = (c: Context, role: SeedRole) => c.accounts.find(a => a.code === `DEMO_${role.toUpperCase()}`)?.id
-  ?? c.accounts.find(a => a.name === legacyNames[role])?.id ?? '<select-account-id>';
+  ?? '<select-account-id>';
 export const entries = (c: Context, amount = '2500', from: SeedRole = 'primary', to: SeedRole = 'secondary') => [
   { account_id: account(c, from), signed_amount_minor: amount, currency: c.currency },
   { account_id: account(c, to), signed_amount_minor: `-${amount}`, currency: c.currency },
