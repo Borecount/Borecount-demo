@@ -11,6 +11,7 @@ COPY apps/api apps/api
 COPY apps/web apps/web
 COPY drizzle drizzle
 COPY openapi openapi
+ARG VITE_PUBLIC_URL=https://borecount.dev/
 RUN npm run build -w @borecount/demo-web
 
 RUN apt-get update \
