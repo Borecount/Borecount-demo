@@ -1,10 +1,18 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   const apiTarget = `http://127.0.0.1:${mode === 'test' ? 3100 : 3000}`;
-
+  const envDir = fileURLToPath(new URL('../..', import.meta.url));
+  const env = loadEnv(mode, envDir, 'VITE_');
+  const publicUrl = new URL(env.VITE_PUBLIC_URL || 'https://borecount.dev/');
+  if (!['http:', 'https:'].includes(publicUrl.protocol)) {
+    throw new Error('VITE_PUBLIC_URL must be an HTTP(S) URL');
+  }
   return {
+    envDir,
+    define: { 'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(publicUrl.href) },
     plugins: [react()],
     server: {
       port: 5173,

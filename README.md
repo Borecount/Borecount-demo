@@ -142,6 +142,11 @@ Stop local services with `docker compose down`. Add `-v` only when you intention
 ## Rebrand identities
 
 Package names and active branding use Borecount. Existing database names/users,
-Docker volumes and backup identities remain unchanged. The hosted
-endpoint `https://luxledger-demo.onrender.com/` retains its deployed address until
-a separate hosting change; the page metadata continues to use that working URL.
+Docker volumes, reset guards and backup identities remain unchanged. The public demo domain is `https://borecount.dev/`; it must be connected in Render
+and Cloudflare before use. The Render service address is `luxledger-demo.onrender.com`.
+
+Set `VITE_PUBLIC_URL=https://borecount.dev/` in the Render service environment before
+building to configure the public URL in page metadata (this is also the default).
+Changing it requires a new build. Local Vite commands read it from the root `.env`.
+`Dockerfile.render` accepts the same variable as a build argument.
+API requests use relative same-origin paths and need no separate API URL.
