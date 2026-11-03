@@ -1,15 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => ({
-  plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      '/v1': mode === 'test' ? 'http://127.0.0.1:3100' : 'http://127.0.0.1:3000',
-      '/demo': mode === 'test' ? 'http://127.0.0.1:3100' : 'http://127.0.0.1:3000',
-      '/docs': mode === 'test' ? 'http://127.0.0.1:3100' : 'http://127.0.0.1:3000',
-      '/openapi.yaml': mode === 'test' ? 'http://127.0.0.1:3100' : 'http://127.0.0.1:3000',
+export default defineConfig(({ mode }) => {
+  const apiTarget = `http://127.0.0.1:${mode === 'test' ? 3100 : 3000}`;
+
+  return {
+    plugins: [react()],
+    server: {
+      port: 5173,
+      proxy: {
+        '/v1': apiTarget,
+        '/demo': apiTarget,
+        '/docs': apiTarget,
+        '/openapi.yaml': apiTarget,
+      },
     },
-  },
-}));
+  };
+});
