@@ -11,7 +11,7 @@ The demo reads process environment directly. Node forbids `--env-file` in `NODE_
 | `DB_POOL_MAX` | `10` | Positive integer maximum connections in the process-local PostgreSQL pool. |
 | `DB_IDLE_TIMEOUT` | `20` | Positive integer idle connection timeout in seconds. |
 | `DB_CONNECT_TIMEOUT` | `10` | Positive integer connection timeout in seconds. |
-| `NODE_ENV` | `development` in example | `production` disables legacy shared `/demo/*` product routes. Private `/demo/session` sandboxes remain available. |
+| `NODE_ENV` | `development` in example | Runtime mode used by the API and build tools. |
 | `PORT` | `3000` | Positive integer; server binds `0.0.0.0`. |
 | `SHUTDOWN_TIMEOUT_MS` | `10000` | Positive integer hard deadline for graceful shutdown. |
 | `JWT_SIGNING_KEY` | **Required** | Unpadded base64url encoding of at least 32 random bytes. Secret. |
@@ -23,9 +23,9 @@ The demo reads process environment directly. Node forbids `--env-file` in `NODE_
 | `RATE_LIMIT_AUTH_TOKEN_WINDOW_SECONDS` | `60` | Positive integer fixed-window size. |
 | `RATE_LIMIT_WRITE_MAX_REQUESTS` | `120` | Positive integer POST `/v1/*` requests per source IP/window/process, excluding separate token policy. |
 | `RATE_LIMIT_WRITE_WINDOW_SECONDS` | `60` | Positive integer fixed-window size. |
-| `BOOTSTRAP_TENANT_NAME` | **Required by bootstrap only** | Initial tenant display name. |
-| `BOOTSTRAP_ADMIN_KEY_NAME` | `Initial admin key` | Initial key display name. |
-| `BOOTSTRAP_ADMIN_API_KEY` | **Required by bootstrap and demo seed** | Raw initial admin key. Secret; choose a high-entropy value in shared environments. |
+| `BOOTSTRAP_TENANT_NAME` | **Optional bootstrap utility only** | Initial tenant display name for manually creating an initial ADMIN key. |
+| `BOOTSTRAP_ADMIN_KEY_NAME` | `Initial admin key` | Initial key display name when using the optional bootstrap utility. |
+| `BOOTSTRAP_ADMIN_API_KEY` | **Optional bootstrap utility only** | Raw initial admin key. Secret; not needed to run the demo or create private sandbox sessions. |
 
 Unknown variables are ignored. Configuration is validated at process startup; invalid values fail fast.
 
@@ -106,17 +106,17 @@ Core records are not soft-deleted. Reversal/correction are the supported way to 
 Before production use, threat-model the deployment, pin exact package versions, establish database/audit/retention controls, and validate the domain model against the intended accounting policy.
 
 For a private, single-instance sales environment, use the narrower
-[hosted demo runbook](HOSTED_DEMO.md). It keeps reset out of the public HTTP surface and packages
-the existing MVP without claiming production SaaS readiness.
+[hosted demo runbook](HOSTED_DEMO.md). It provisions isolated sandboxes without a shared reset and packages
+the demo without claiming production SaaS readiness.
 
 ## Private sandbox lifecycle
 
-`POST /demo/session` provisions an isolated tenant with two assets/ledgers and returns a short-lived SERVICE bearer. A random 256-bit session credential is set as HttpOnly, SameSite=Strict cookie; only its SHA-256 hash is persisted. TLS ingress supplies `X-Forwarded-Proto: https` so the cookie is Secure. No raw library API key is exposed. `GET /demo/session` refreshes the bearer until the fixed eight-hour session boundary; the API rejects sandbox bearer use after that boundary as well.
+`POST /demo/session` provisions a private tenant with USD/EUR assets, ledgers, demo accounts, and opening transactions through the public application services, then returns a short-lived SERVICE bearer. A random 256-bit session credential is set as an HttpOnly, SameSite=Strict cookie; only its SHA-256 hash is persisted as host session metadata. TLS ingress supplies `X-Forwarded-Proto: https` so the cookie is Secure. No raw library API key is exposed. `GET /demo/session` refreshes the bearer until the fixed eight-hour session boundary; the API rejects sandbox bearer use after that boundary as well.
 
 New sandbox creation is limited to 20 per source IP per hour per process. Financial writes retain the existing `/v1` limiter. Because forwarded-IP trust is not configured here, visitors behind nginx share the proxy's rate-limit bucket; configure ingress limits / trusted proxy settings before widening access. Browser Origin / Fetch Metadata checks reject cross-site session creation.
 
-Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. The host-only `/demo/session/holds` read uses explicit tenant/ledger scope and a transaction-local RLS tenant setting. All financial mutations use the public library services/routes.
+Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. The console reads holds through public `/v1/holds` with tenant-scoped authentication, ledger/state filters, and opaque cursor pagination. All financial reads and mutations use the public HTTP contract and application services.
 
-Expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. Use a dedicated demo database and the guarded operator reset only during maintenance when all sessions may be discarded; immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0005–0007 are upstream 0.5.0 grant index/refund support; 0008 adds the host session table.
+Expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. The demo has no public reset endpoint or database-reset CLI; use a dedicated demo database and manage its lifecycle through separately reviewed infrastructure procedures. Immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0005–0007 are upstream 0.5.0 grant index/refund support; 0008 adds the host session table.
 
 `npm run verify:schema` compares the installed library plus host Drizzle model with the checked-in snapshot. `npm run generate:api` regenerates frontend DTO types after an intentional contract update. Neither changes the downloaded canonical YAML.

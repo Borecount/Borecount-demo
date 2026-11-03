@@ -22,13 +22,12 @@ Generate independent secrets:
 
 ```sh
 openssl rand -hex 32
-openssl rand -hex 32
 openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
 ```
 
-Use the first value as `POSTGRES_PASSWORD`, the second as `BOOTSTRAP_ADMIN_API_KEY`, and the
-base64url value as `JWT_SIGNING_KEY`. URL-encode the database password when placing it inside
-`DATABASE_URL`.
+Use the first value as `POSTGRES_PASSWORD` and the base64url value as `JWT_SIGNING_KEY`.
+URL-encode the database password when placing it inside `DATABASE_URL`. No admin bootstrap key
+is needed for private sandbox sessions.
 
 ## Start and verify
 
@@ -39,27 +38,21 @@ curl -fsS http://127.0.0.1:8080/ready
 curl -fsS http://127.0.0.1:8080/demo/contract > /dev/null
 ```
 
-The API container applies checked-in migrations and runs the idempotent demo seed before it
-accepts traffic. The seed creates the same logical ledger, account addresses, reference, amount,
-and balances on a new database. Restarting containers does not reset customer-visible state.
+The API container applies checked-in migrations before it accepts traffic. Each visitor's private
+tenant, ledgers, accounts, and opening transactions are provisioned when they create a sandbox.
+Restarting containers does not reset customer-visible state.
 
 Only nginx publishes a host port. PostgreSQL and the API remain on the private Compose network.
-The browser never receives `BOOTSTRAP_ADMIN_API_KEY` or `JWT_SIGNING_KEY`.
+The browser never receives `JWT_SIGNING_KEY`.
 
 ## Start a guided call
 
-Open the UI in a private window or click **New sandbox**. This creates a private tenant and revokes only this browser's previous service credential. In the USD ledger Alice starts at 100.00 and Bob at zero; in the EUR ledger Eva starts at 175.00 and Leo at zero. Whole-database reset is unnecessary between visitors.
+Open the UI in a private window or click **New sandbox**. This creates a private tenant and revokes only this browser's previous service credential. In the USD ledger Alice starts at 100.00 and Bob at zero; in the EUR ledger Eva starts at 175.00 and Leo at zero.
 
-For a full maintenance reset only, stop visitor traffic and use:
-
-```sh
-docker compose --env-file .env.hosted -f compose.hosted.yml run --rm \
-  -e DEMO_ALLOW_RESET=true api npm run reset:demo
-```
-
-The command requires `DEMO_ALLOW_RESET=true` and a database named exactly `luxledger_demo_hosted`. It truncates that dedicated database, including all sandboxes. Never point it at a customer or shared ledger database.
-
-Private sessions last eight hours. Replaced/expired tenant audit data is retained until maintenance reset; this is not a production data-retention service. See [OPERATIONS.md](OPERATIONS.md#private-sandbox-lifecycle).
+Private sessions last eight hours. Replaced/expired tenant history is retained; this demo does not
+include a reset command or a production data-retention service. Use your separately reviewed
+infrastructure procedures to retire a disposable demo database. See
+[OPERATIONS.md](OPERATIONS.md#private-sandbox-lifecycle).
 
 ## Operate
 

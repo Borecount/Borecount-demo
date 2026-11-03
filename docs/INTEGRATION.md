@@ -4,7 +4,7 @@ The checked-in [OpenAPI document](../openapi/openapi.yaml) is a byte-for-byte co
 
 ## Authentication and roles
 
-Exchange a raw API key at `POST /v1/auth/token` using `x-api-key`. All other `/v1/*` calls use `Authorization: Bearer <access_token>`.
+The browser obtains and renews its sandbox bearer through host-owned `/demo/session`. For hosts that provision API keys directly, exchange a raw key at `POST /v1/auth/token` using `x-api-key`. Other `/v1/*` calls use `Authorization: Bearer <access_token>`.
 
 | Role | Non-admin `/v1/*` | List/create/revoke API keys |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ A JWT is backed by its API-key record. Every authenticated request rechecks that
 
 ## Pagination
 
-List ledgers, assets, API keys, transactions, accounts, entries, balance history, reconciliation rules, and reconciliation results with cursor pagination:
+List ledgers, accounts, transactions, entries, holds and their lifecycle details, credit grants/lots/lineage, API keys, balance history, and reconciliation rules/results with cursor pagination:
 
 ```http
 GET /v1/transactions?ledger_id=<uuid>&limit=50
