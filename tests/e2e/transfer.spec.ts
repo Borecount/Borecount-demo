@@ -179,7 +179,7 @@ test('credits expose grant issuance, consumption, partial refunds and lineage', 
   expect(run.as_of).toBe(refreshed.as_of);
 });
 
-test('finance imports CSV, creates rules and reports external differences', async ({ page }) => {
+test('finance imports CSV and restores saved reconciliation after reload', async ({ page }) => {
   await ready(page); await tab(page, 'Reconciliation');
   await preset(page, 'Create matching rule');
   await expect(page.getByLabel('rule ID')).not.toHaveValue('');
@@ -193,6 +193,26 @@ test('finance imports CSV, creates rules and reports external differences', asyn
   await preset(page, 'Run reconciliation');
   await expect(page.getByLabel('run ID')).not.toHaveValue('');
   await expect(page.getByRole('region', { name: 'Request journal' })).toContainText('"unmatched_external_count": 1');
+  const uploadId = await page.getByLabel('upload ID').inputValue();
+  const runId = await page.getByLabel('run ID').inputValue();
+
+  await page.reload();
+  await expect(page.getByTestId('account-wallet:alice')).toContainText('100.00 USD');
+  await tab(page, 'Reconciliation');
+  await expect(page.getByLabel('upload ID')).toHaveValue('');
+  await expect(page.getByLabel('run ID')).toHaveValue('');
+  for (const [label, id] of [['upload ID', uploadId], ['run ID', runId]] as const) {
+    await page.getByRole('row').filter({ hasText: id }).getByRole('button', { name: 'Select' }).click();
+    await expect(page.getByLabel(label)).toHaveValue(id);
+  }
+
+  const resultsResponse = page.waitForResponse(response =>
+    response.request().method() === 'GET' &&
+    new URL(response.url()).pathname === `/v1/reconciliation/runs/${runId}/results`,
+  );
+  await page.getByRole('button', { name: 'Load reconciliation results' }).click();
+  expect((await resultsResponse).status()).toBe(200);
+  await expect(page.getByRole('cell', { name: 'unmatched_external', exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 

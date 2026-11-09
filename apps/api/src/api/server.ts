@@ -12,7 +12,8 @@ import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
 import type { EndpointRateLimitConfig, RateLimitConfig } from '@api/rate-limit/policy';
 import type { CreateServerCoreOptions } from '@api/server-types';
 import type { ApplicationServices } from '@borecount/core/application';
-import { ApiKeyRole, ForbiddenError, UnauthorizedError } from '@borecount/core/application';
+import { ApiKeyRole } from '@borecount/core/application';
+import { ForbiddenError, UnauthorizedError } from '@borecount/core/errors';
 import { registerLedgerAdapter } from '@borecount/fastify-routes';
 import {
   type AuthTokenRequestHeaders,
@@ -468,5 +469,5 @@ export const registerApplication = (
     },
   );
 
-  registerLedgerAdapter(server, services);
+  registerLedgerAdapter(server, services, { authorizeAdjustment: false });
 };

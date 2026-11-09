@@ -80,6 +80,10 @@ paths:
       security:
         - ApiKeyAuth: []
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Access token issued
           content:
@@ -98,6 +102,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateLedgerRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Ledger created
           content:
@@ -131,6 +139,8 @@ paths:
                   eq: Operating
       summary: List tenant ledgers
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Tenant ledgers
           content:
@@ -152,6 +162,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Ledger
           content:
@@ -174,6 +186,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateTransactionRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Transaction created
           content:
@@ -210,6 +226,8 @@ paths:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/LedgerIdQuery'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Transaction page
           content:
@@ -248,6 +266,12 @@ paths:
             schema:
               $ref: '#/components/schemas/BulkCreateTransactionRequest'
       responses:
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: At least one transaction created
           content:
@@ -275,6 +299,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Transaction
           content:
@@ -323,6 +349,10 @@ paths:
                   reference: tx-ref-1-reversal
                   description: Reverse invalid posting
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Reversal created
           content:
@@ -365,6 +395,12 @@ paths:
                       signed_amount_minor: '-100'
                       currency: USD
       responses:
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Correction flow created
           content:
@@ -387,6 +423,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateAccountRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Account created
           content:
@@ -417,6 +457,8 @@ paths:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/LedgerIdQuery'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Account page
           content:
@@ -438,6 +480,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Account
           content:
@@ -467,6 +511,8 @@ paths:
             type: string
             format: date-time
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Historical account balance
           content:
@@ -515,6 +561,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Account balance history page
           content:
@@ -555,6 +603,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Bounded account statement page with stable as-of boundary
           content:
@@ -602,6 +652,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Bounded credit lot statement page
           content:
@@ -638,6 +690,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Hold page
           content:
@@ -657,6 +711,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateHoldRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Hold created
           content:
@@ -687,6 +745,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Hold summary
           content:
@@ -726,6 +786,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Hold entry page
           content:
@@ -766,6 +828,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Hold capture page
           content:
@@ -806,6 +870,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Hold credit allocation page
           content:
@@ -835,6 +901,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CommitHoldRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Hold commit created a transaction
           content:
@@ -866,6 +936,10 @@ paths:
             type: string
             format: uuid
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Hold voided
           content:
@@ -898,6 +972,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Entry page
           content:
@@ -919,6 +995,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Trial balance
           content:
@@ -955,6 +1033,8 @@ paths:
                   eq: ADMIN
       summary: List API keys (admin only)
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: API key list
           content:
@@ -976,6 +1056,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateApiKeyRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: API key created
           content:
@@ -994,6 +1078,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ApiKeyIdPath'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '204':
           description: API key revoked
         '400':
@@ -1012,6 +1100,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateReconciliationMatchingRuleRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Matching rule created
           content:
@@ -1045,6 +1137,8 @@ paths:
                   eq: invoice-match
       summary: List reconciliation matching rules
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Matching rules
           content:
@@ -1073,6 +1167,10 @@ paths:
             schema:
               $ref: '#/components/schemas/IngestExternalRecordsRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: External records accepted
           content:
@@ -1083,9 +1181,117 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+  /v1/reconciliation/uploads:
+    get:
+      summary: List reconciliation uploads
+      description: Uploads are ordered by creation time and ID, newest first.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque continuation cursor. Keep the resource, tenant, parent ID (where applicable), and filters fixed.
+          schema: { type: string, minLength: 1 }
+        - name: where
+          in: query
+          required: false
+          description: URL-encoded typed JSON filters (maximum 8192 decoded bytes). Fields are id, source, and created_at.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationUploadsWhere' }
+              example: { source: { eq: bank-feed } }
+      responses:
+        '200':
+          description: List reconciliation uploads
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationUploadsPage' }
+        '400': { $ref: '#/components/responses/BadRequestError' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '429': { $ref: '#/components/responses/RateLimitExceededError' }
+  /v1/reconciliation/uploads/{id}:
+    get:
+      summary: Get a reconciliation upload
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Get a reconciliation upload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalRecordsUpload' }
+        '400': { $ref: '#/components/responses/BadRequestError' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '429': { $ref: '#/components/responses/RateLimitExceededError' }
+  /v1/reconciliation/uploads/{id}/records:
+    get:
+      summary: List normalized records for a reconciliation upload
+      description: Records are ordered by occurrence time and ID, newest first. The page contains normalized fields.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque continuation cursor. Keep the resource, tenant, parent ID (where applicable), and filters fixed.
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: List normalized records for a reconciliation upload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationRecordsPage' }
+        '400': { $ref: '#/components/responses/BadRequestError' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '429': { $ref: '#/components/responses/RateLimitExceededError' }
   /v1/reconciliation/runs:
+    get:
+      summary: List persisted reconciliation runs
+      description: Runs are ordered by start time and ID, newest first. Use the run results endpoint for paginated details.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque continuation cursor. Keep the resource, tenant, parent ID (where applicable), and filters fixed.
+          schema: { type: string, minLength: 1 }
+        - name: where
+          in: query
+          required: false
+          description: URL-encoded typed JSON filters (maximum 8192 decoded bytes). Fields are id, ledger_id, upload_id, status, and started_at.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationRunsWhere' }
+              example: { status: { eq: completed } }
+      responses:
+        '200':
+          description: List persisted reconciliation runs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationRunsPage' }
+        '400': { $ref: '#/components/responses/BadRequestError' }
+        '401': { $ref: '#/components/responses/UnauthorizedError' }
+        '429': { $ref: '#/components/responses/RateLimitExceededError' }
     post:
       summary: Run baseline reconciliation
+      description: Dry runs return a transient report. Persisted runs can be discovered through the run list.
       requestBody:
         required: true
         content:
@@ -1093,6 +1299,10 @@ paths:
             schema:
               $ref: '#/components/schemas/RunReconciliationRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Reconciliation run persisted
           content:
@@ -1120,6 +1330,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Reconciliation run
           content:
@@ -1159,6 +1371,8 @@ paths:
                 status:
                   eq: conflict
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: A page of run results
           content:
@@ -1177,6 +1391,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateCreditGrantRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Grant created
           content:
@@ -1227,6 +1445,8 @@ paths:
           required: false
           schema: { type: string, minLength: 1 }
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Grants ordered by creation time then id
           content:
@@ -1246,6 +1466,8 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Credit grant
           content:
@@ -1268,6 +1490,10 @@ paths:
             schema:
               $ref: '#/components/schemas/ProcessCreditGrantExpirationsRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Deterministic bounded FEFO preview
           content:
@@ -1288,6 +1514,10 @@ paths:
             schema:
               $ref: '#/components/schemas/ProcessCreditGrantExpirationsRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Expirations posted by this worker
           content:
@@ -1313,6 +1543,10 @@ paths:
             schema:
               $ref: '#/components/schemas/ReverseCreditGrantRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Compensation posted
           content:
@@ -1349,6 +1583,10 @@ paths:
             schema:
               $ref: '#/components/schemas/RefundCreditGrantRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Refund posted
           content:
@@ -1372,7 +1610,7 @@ paths:
   /v1/adjustments/credit:
     post:
       summary: Post a credit adjustment to an account
-      description: Posts a balanced adjustment with immutable actor and reason audit data. Idempotent by tenant reference; a changed payload conflicts. The credit leg cannot target a grant-enabled account; issue a credit grant instead.
+      description: Posts a balanced adjustment with immutable actor and reason audit data. The host authorizes the operation and validates the opaque actor claim against trusted context; conflicting actor claims are forbidden. SERVICE credentials alone do not verify end-user identity. Idempotent by tenant reference; a changed payload conflicts. The credit leg cannot target a grant-enabled account; issue a credit grant instead.
       requestBody:
         required: true
         content:
@@ -1380,6 +1618,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateAdjustmentRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Adjustment posted
           content:
@@ -1398,12 +1640,14 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
   /v1/adjustments/debit:
     post:
       summary: Post a debit adjustment to an account
-      description: Posts a balanced adjustment with immutable actor and reason audit data. Idempotent by tenant reference; a changed payload conflicts. The credit leg cannot target a grant-enabled account; issue a credit grant instead.
+      description: Posts a balanced adjustment with immutable actor and reason audit data. The host authorizes the operation and validates the opaque actor claim against trusted context; conflicting actor claims are forbidden. SERVICE credentials alone do not verify end-user identity. Idempotent by tenant reference; a changed payload conflicts. The credit leg cannot target a grant-enabled account; issue a credit grant instead.
       requestBody:
         required: true
         content:
@@ -1411,6 +1655,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateAdjustmentRequest'
       responses:
+        '413':
+          $ref: '#/components/responses/RequestTooLargeError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '201':
           description: Adjustment posted
           content:
@@ -1429,6 +1677,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '404':
           $ref: '#/components/responses/NotFoundError'
   /v1/credit-grants/{id}/allocations:
@@ -1453,6 +1703,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Immutable allocation lineage page ordered by entry creation, entry id, then grant id
           content:
@@ -1485,6 +1737,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Immutable allocation lineage page ordered by entry creation, entry id, then grant id
           content:
@@ -1504,6 +1758,8 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Summary reconciled with the ledger
           content:
@@ -1540,6 +1796,8 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
+        '429':
+          $ref: '#/components/responses/RateLimitExceededError'
         '200':
           description: Lots ordered by grant creation time then grant id
           content:
@@ -1594,6 +1852,26 @@ components:
         type: string
         format: uuid
   responses:
+    RequestTooLargeError:
+      description: Host request-size limit exceeded before application services run. Hosts choose and document their limits.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimitExceededError:
+      description: Host resource limit exceeded. Enforcement and accounting are host responsibilities; this contract does not imply distributed enforcement.
+      headers:
+        Retry-After:
+          required: true
+          description: Delay in whole seconds before retrying; equals retry_after_seconds in the response body.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitExceededResponse'
     BadRequestError:
       description: Invalid input
       content:
@@ -1703,11 +1981,14 @@ components:
         amount_minor: { type: string, pattern: '^[1-9][0-9]*$' }
         description: { type: string, pattern: '^(?=.*\S).+$' }
         reason_code: { type: string, pattern: '^(?=.*\S).+$' }
-        actor_id: { type: string, pattern: '^(?=.*\S).+$' }
+        actor_id:
+          type: string
+          pattern: '^(?=.*\S).+$'
+          description: Opaque actor claim. The host must authorize the operation and validate this claim against trusted context; it is not proof of authenticated user identity.
         attributes:
           type: object
           additionalProperties: true
-          description: Optional caller-defined JSON object stored with the adjustment audit record.
+          description: Optional caller-defined audit metadata, not verified identity or authorization evidence. Hosts must protect any reserved attribution fields.
     Adjustment:
       type: object
       additionalProperties: false
@@ -1826,8 +2107,20 @@ components:
               amount_minor: { type: string, pattern: '^[1-9][0-9]*$' }
               cumulative_expired_minor: { type: string, pattern: '^[1-9][0-9]*$' }
               transaction_id: { type: string, format: uuid, nullable: true }
+    RateLimitExceededResponse:
+      type: object
+      additionalProperties: false
+      required: [error, message, retry_after_seconds]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        retry_after_seconds: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        details:
+          type: object
+          additionalProperties: true
     ErrorResponse:
       type: object
+      additionalProperties: false
       required: [error, message]
       properties:
         error:
@@ -2772,6 +3065,97 @@ components:
             format: uuid
         dry_run:
           type: boolean
+    ReconciliationUploadsWhere:
+      {"type":"object","additionalProperties":false,"properties":{"id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"uuid"},"ne":{"type":"string","format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"source":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string"},"ne":{"type":"string"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string"}}}},"created_at":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"ne":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."}},"gt":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"gte":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"lt":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"lte":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."}}}}}
+    ReconciliationRunsWhere:
+      {"type":"object","additionalProperties":false,"properties":{"id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"uuid"},"ne":{"type":"string","format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"ledger_id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"uuid"},"ne":{"type":"string","format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"upload_id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"uuid"},"ne":{"type":"string","format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"status":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","enum":["pending","running","completed","failed"]},"ne":{"type":"string","enum":["pending","running","completed","failed"]},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","enum":["pending","running","completed","failed"]}}}},"started_at":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"ne":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."}},"gt":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"gte":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"lt":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"lte":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."}}}}}
+    ReconciliationUploadsPage:
+      type: object
+      additionalProperties: false
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ExternalRecordsUpload' }
+        next_cursor: { type: string, nullable: true }
+    ReconciliationRunsPage:
+      type: object
+      additionalProperties: false
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationRunSummary' }
+        next_cursor: { type: string, nullable: true }
+    ReconciliationRecordsPage:
+      type: object
+      additionalProperties: false
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationRecord' }
+        next_cursor: { type: string, nullable: true }
+    ReconciliationRecord:
+      type: object
+      additionalProperties: false
+      required: [id, external_id, amount_minor, currency, reference, description, occurred_at]
+      properties:
+        id: { type: string, format: uuid }
+        external_id: { type: string }
+        amount_minor: { type: string, pattern: '^[1-9][0-9]*$' }
+        currency: { type: string }
+        reference: { type: string }
+        description: { type: string, nullable: true }
+        occurred_at: { type: string, format: date-time }
+    ReconciliationRunSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [id, tenant_id, ledger_id, upload_id, strategy, status, dry_run, matched_count, unmatched_external_count, unmatched_internal_count, mismatched_count, conflict_count, started_at, completed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        ledger_id:
+          type: string
+          format: uuid
+        upload_id:
+          type: string
+          format: uuid
+        strategy:
+          type: string
+          enum: [one_to_one]
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        dry_run:
+          type: boolean
+        matched_count:
+          type: integer
+          minimum: 0
+        unmatched_external_count:
+          type: integer
+          minimum: 0
+        unmatched_internal_count:
+          type: integer
+          minimum: 0
+        mismatched_count:
+          type: integer
+          minimum: 0
+        conflict_count:
+          type: integer
+          minimum: 0
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
     ReconciliationResultsWhere:
       {"type":"object","additionalProperties":false,"properties":{"id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"uuid"},"ne":{"type":"string","format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"run_id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"uuid"},"ne":{"type":"string","format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"external_record_id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":["string","null"],"format":"uuid"},"ne":{"type":["string","null"],"format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"external_id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":["string","null"]},"ne":{"type":["string","null"]},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string"}}}},"transaction_id":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":["string","null"],"format":"uuid"},"ne":{"type":["string","null"],"format":"uuid"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"uuid"}}}},"status":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","enum":["matched","unmatched_external","unmatched_internal","mismatched","conflict"]},"ne":{"type":"string","enum":["matched","unmatched_external","unmatched_internal","mismatched","conflict"]},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","enum":["matched","unmatched_external","unmatched_internal","mismatched","conflict"]}}}},"reason":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string"},"ne":{"type":"string"},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string"}}}},"created_at":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"eq":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"ne":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"in":{"type":"array","minItems":1,"maxItems":100,"items":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."}},"gt":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"gte":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"lt":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."},"lte":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,3}0*)?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$","description":"Timezone date-time exactly representable in milliseconds; submillisecond digits must be zero."}}}}}
     ReconciliationResultsListResponse:

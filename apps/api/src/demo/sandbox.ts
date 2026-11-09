@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { AccountSide, ApiKeyRole, UnauthorizedError, type ApplicationServices } from '@borecount/core/application';
+import { AccountSide, ApiKeyRole, type ApplicationServices } from '@borecount/core/application';
+import { UnauthorizedError } from '@borecount/core/errors';
 import { OverdraftPolicy } from '@borecount/core/account';
 import type { DbClient } from '@borecount/postgres-adapter';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';

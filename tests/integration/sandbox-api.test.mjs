@@ -150,9 +150,23 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   await call('POST', '/v1/adjustments/credit', { ledger_id: ledger.id, account_id: id('wallet:alice'), offset_account_id: id('system:funding'), reference: 'adjust-credit', amount_minor: '100', description: 'Correction', actor_id: 'demo-operator', reason_code: 'PROVIDER_DIFFERENCE' }, 201);
   const rule = (await call('POST', '/v1/reconciliation/matching-rules', { name: 'Reference amount', criteria: [{ field: 'reference', operator: 'equals' }, { field: 'amount', operator: 'equals' }, { field: 'currency', operator: 'equals' }] }, 201)).body;
   const upload = (await call('POST', '/v1/reconciliation/external-records', { source: 'sandbox-bank', records: [{ id: 'bank-opening', reference: `sandbox-${currency}-opening`, currency, amount_minor: '10000', date: new Date().toISOString() }, { id: 'bank-missing', reference: 'missing', currency, amount_minor: '99', date: new Date().toISOString() }] }, 201)).body;
+  const uploadsPage = (await call('GET', `/v1/reconciliation/uploads?limit=1&where=${encodeURIComponent(JSON.stringify({ source: { eq: 'sandbox-bank' } }))}`, undefined, 200)).body;
+  assert.equal(uploadsPage.data.length, 1); assert.equal(uploadsPage.data[0].upload_id, upload.upload_id);
   const run = (await call('POST', '/v1/reconciliation/runs', { ledger_id: ledger.id, upload_id: upload.upload_id, matching_rule_ids: [rule.id], strategy: 'one_to_one', dry_run: false }, 201)).body;
   assert.equal(run.matched_count, 1); assert.equal(run.unmatched_external_count, 1);
+  const runFilter = encodeURIComponent(JSON.stringify({ ledger_id: { eq: ledger.id }, upload_id: { eq: upload.upload_id }, status: { eq: 'completed' } }));
+  const runsPage = (await call('GET', `/v1/reconciliation/runs?limit=1&where=${runFilter}`, undefined, 200)).body;
+  assert.equal(runsPage.data.length, 1); assert.equal(runsPage.data[0].id, run.id); assert.equal('results' in runsPage.data[0], false);
   await call('GET', `/v1/reconciliation/runs/${run.id}/results?where=${encodeURIComponent(JSON.stringify({ status: { eq: 'matched' } }))}`, undefined, 200);
+  const resultsQuery = `/v1/reconciliation/runs/${run.id}/results?limit=1`;
+  const resultPage = (await call('GET', resultsQuery, undefined, 200)).body;
+  assert.equal(resultPage.data.length, 1); assert.ok(resultPage.next_cursor);
+  const resultNextPage = (await call('GET', `${resultsQuery}&cursor=${encodeURIComponent(resultPage.next_cursor)}`, undefined, 200)).body;
+  assert.equal(resultNextPage.data.length, 1);
+  assert.ok(resultNextPage.next_cursor === null || typeof resultNextPage.next_cursor === 'string');
+  const dryRun = (await call('POST', '/v1/reconciliation/runs', { ledger_id: ledger.id, upload_id: upload.upload_id, matching_rule_ids: [rule.id], strategy: 'one_to_one', dry_run: true }, 200)).body;
+  const persistedDryRun = (await call('GET', `/v1/reconciliation/runs?where=${encodeURIComponent(JSON.stringify({ id: { eq: dryRun.id } }))}`, undefined, 200)).body;
+  assert.equal(persistedDryRun.data.length, 0);
   await call('GET', '/v1/admin/api-keys', undefined, 403);
   await call('GET', '/v1/accounts?where=' + encodeURIComponent('{"metadata":{"eq":"x"}}'), undefined, 400);
   // A second browser has its own tenant and cannot read or mutate the first browser's resources.
@@ -163,6 +177,8 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   await call('GET', `/v1/accounts/${id('wallet:alice')}`, undefined, 404);
   await call('POST', `/v1/holds/${hold.hold_id}/void`, undefined, 404);
   assert.equal((await call('GET', `/v1/holds?where=${holdWhere}`, undefined, 200)).body.data.length, 0);
+  assert.equal((await call('GET', '/v1/reconciliation/uploads', undefined, 200)).body.data.length, 0);
+  assert.equal((await call('GET', '/v1/reconciliation/runs', undefined, 200)).body.data.length, 0);
   cookie = firstCookie; token = firstToken;
   const reset = (await call('POST', '/demo/session', undefined, 201)).body;
   assert.notEqual(reset.tenant_id, first.tenant_id);
