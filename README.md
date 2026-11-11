@@ -1,6 +1,6 @@
 # Borecount Demo
 
-Interactive reference console composing `@borecount/core`, Fastify, Drizzle, PostgreSQL, and React into wallets, marketplace settlement, authorizations, prepaid credits, and finance workflows. The checked-in Borecount contract is [OpenAPI 0.7.0](openapi/openapi.yaml).
+Interactive reference console composing `@borecount/core`, Fastify, Drizzle, PostgreSQL, and React into wallets, marketplace settlement, authorizations, prepaid credits, and finance workflows. The checked-in Borecount contract is [OpenAPI 0.8.0](openapi/openapi.yaml).
 
 The browser sends actual `/v1/*` requests using the released OpenAPI payloads and responses. Each browser session gets an isolated tenant, USD/EUR ledgers, six accounts per ledger, and a short-lived SERVICE token. Bootstrap administrative credentials remain server-side. The **API docs** link opens locally served Swagger UI with authenticated **Try it out** in a separate tab.
 
@@ -43,6 +43,8 @@ When `Borecount demo is ready` appears, open `http://localhost:5173`. Stop API a
 The steps below describe the same setup individually for readers learning how the backend is composed.
 
 ### 2. Start PostgreSQL and migrate
+
+Version 0.8.0 uses the squashed Borecount migration history. If upgrading an existing disposable local demo, recreate its database before running the steps below. With the default Docker Compose setup, `docker compose down -v` deletes the demo's PostgreSQL volume and all data in it.
 
 ```sh
 docker compose up -d postgres

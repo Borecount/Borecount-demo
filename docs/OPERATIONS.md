@@ -82,7 +82,7 @@ For a release:
 6. deploy API instances and require `/ready` before traffic;
 7. run the quickstart/smoke walkthrough and monitor errors/latency.
 
-The current pre-production migration chain has no application-level downgrade command. Recreate disposable local databases that use the retired demo-only history. For any durable environment, schema rollback requires a separately reviewed reverse migration or a tested restore. Never edit a migration already applied to a shared environment.
+The 0.8.0 migration chain starts with the squashed upstream baseline. Recreate disposable demo databases initialized by earlier releases before applying it. Durable environments require a separately reviewed data migration. Schema rollback requires a separately reviewed reverse migration or a tested restore.
 
 ## Production limitations and non-goals
 
@@ -117,6 +117,6 @@ New sandbox creation is limited to 20 per source IP per hour per process. Financ
 
 Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. The console reads holds through public `/v1/holds` with tenant-scoped authentication, ledger/state filters, and opaque cursor pagination. All financial reads and mutations use the public HTTP contract and application services.
 
-Expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. The demo has no public reset endpoint or database-reset CLI; use a dedicated demo database and manage its lifecycle through separately reviewed infrastructure procedures. Immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0005–0007 are upstream 0.5.0 grant index/refund support; 0008 adds the host session table.
+Expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. The demo has no public reset endpoint or database-reset CLI; use a dedicated demo database and manage its lifecycle through separately reviewed infrastructure procedures. Immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0000–0002 come from Borecount v0.8.0. Migration 0003 adds the host session table.
 
 `npm run verify:schema` compares the installed library plus host Drizzle model with the checked-in snapshot. `npm run generate:api` regenerates frontend DTO types after an intentional contract update. Neither changes the downloaded canonical YAML.
