@@ -11,6 +11,7 @@ import { ApiMetrics } from '@api/observability/metrics';
 import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
 import type { EndpointRateLimitConfig, RateLimitConfig } from '@api/rate-limit/policy';
 import type { CreateServerCoreOptions } from '@api/server-types';
+import type { OpenApiDocument } from '@api/openapi-types';
 import type { ApplicationServices } from '@borecount/core/application';
 import { ApiKeyRole } from '@borecount/core/application';
 import { ForbiddenError, UnauthorizedError } from '@borecount/core/errors';
@@ -29,14 +30,17 @@ const TOKEN_ENDPOINT = '/v1/auth/token';
 const V1_ROUTE_PREFIX = '/v1/';
 const OPENAPI_SPEC_PATH = fileURLToPath(new URL('../../../../openapi/openapi.yaml', import.meta.url));
 const OPENAPI_SPEC_CONTENT = readFileSync(OPENAPI_SPEC_PATH, 'utf8');
-const SWAGGER_SPEC = parseYaml(OPENAPI_SPEC_CONTENT);
+const SWAGGER_SPEC = parseYaml(OPENAPI_SPEC_CONTENT) as OpenApiDocument;
 // Presentation-only grouping and same-origin server URL. The downloadable YAML stays canonical.
 SWAGGER_SPEC.servers = [{ url: '/' }];
 const ROUTE_TAGS: Record<string, string> = { ledgers: 'Ledgers', accounts: 'Accounts', transactions: 'Transactions',
   entries: 'Entries', holds: 'Holds', 'credit-grants': 'Credit grants', adjustments: 'Adjustments',
   reconciliation: 'Reconciliation', admin: 'Administration', auth: 'Authentication' };
-for (const [path, methods] of Object.entries(SWAGGER_SPEC.paths) as [string, Record<string, { tags?: string[] }>][]) {
-  for (const method of ['get', 'post']) if (methods[method]) methods[method].tags = [ROUTE_TAGS[path.split('/')[2]] ?? 'Operations'];
+for (const [path, methods] of Object.entries(SWAGGER_SPEC.paths)) {
+  for (const method of ['get', 'post'] as const) {
+    const operation = methods[method];
+    if (operation) operation.tags = [ROUTE_TAGS[path.split('/')[2]] ?? 'Operations'];
+  }
 }
 const SWAGGER_UI_HTML = `<!doctype html>
 <html lang="en">

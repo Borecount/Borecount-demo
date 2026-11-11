@@ -7,6 +7,7 @@ import { generateUuidV7, TenantId } from '@borecount/core/base';
 import { createUnitOfWork, type DbClient } from '@borecount/postgres-adapter';
 import { demoSessions } from './schema';
 import { registerLibrary } from './library';
+import type { SandboxSession } from './sandbox-types';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import { RateLimitExceededError } from '../api/errors';
@@ -24,17 +25,17 @@ const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split('
 export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig) {
   const limiter = new FixedWindowLimiter();
   const unitOfWork = createUnitOfWork(db);
-  const session = async (request: FastifyRequest) => {
+  const session = async (request: FastifyRequest): Promise<SandboxSession> => {
     const secret = cookieValue(request);
     if (!secret || !/^[a-f0-9]{64}$/.test(secret)) throw new UnauthorizedError('Start a demo session first');
-    const [row] = await db.sql`select s.*, k.revoked_at from demo_sessions s
+    const [row] = await db.sql<SandboxSession[]>`select s.*, k.revoked_at from demo_sessions s
       join api_keys k on k.id = s.api_key_id
       where s.token_hash = ${hash(secret)} and s.expires_at > now() and k.revoked_at is null`;
     if (!row) throw new UnauthorizedError('Demo session expired. Start a new sandbox.');
     return row;
   };
   registerLibrary(server, services, session);
-  const payload = async (row: Record<string, any>) => ({
+  const payload = async (row: SandboxSession) => ({
     access_token: issueAccessToken({ tenantId: row.tenant_id, apiKeyId: row.api_key_id, role: ApiKeyRole.SERVICE }, jwt),
     expires_in: jwt.accessTokenTtlSeconds,
     session_expires_at: new Date(row.expires_at).toISOString(),

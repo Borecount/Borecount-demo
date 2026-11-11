@@ -10,40 +10,17 @@ import {
   toRestRequest,
   toLibraryCall,
   libraryArguments,
-  type LibraryCall,
-  type LibraryOperation,
 } from '../../../../shared/library';
+import type {
+  LibraryCall,
+  LibraryOperation,
+  LibraryExecutionResponse,
+} from '../../../../shared/library-types';
+import type { JsonSchema, OpenApiDocument } from '../api/openapi-types';
+import type { OperationSchemas, ResultMapper } from './library-types';
+import type { SandboxIdentity } from './sandbox-types';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import { RateLimitExceededError } from '../api/errors';
-
-type JsonSchema = Record<string, unknown>;
-interface OpenApiParameter {
-  in: string;
-  name: string;
-  required?: boolean;
-  schema?: JsonSchema;
-}
-interface OpenApiOperation {
-  parameters?: OpenApiParameter[];
-  requestBody?: { content: { 'application/json': { schema: JsonSchema } } };
-}
-interface OpenApiPath {
-  parameters?: OpenApiParameter[];
-  get?: OpenApiOperation;
-  post?: OpenApiOperation;
-}
-interface OpenApiDocument {
-  paths: Record<string, OpenApiPath>;
-}
-interface OperationSchemas {
-  body: JsonSchema;
-  query: JsonSchema & { properties: Record<string, JsonSchema> };
-  parameter?: JsonSchema;
-}
-interface SandboxIdentity {
-  tenant_id: string;
-  api_key_id: string;
-}
 
 const specification = parse(
   readFileSync(new URL('../../../../openapi/openapi.yaml', import.meta.url), 'utf8'),
@@ -144,9 +121,6 @@ const schemasByOperation = new Map(
   libraryOperations.map((operation) => [operation.operation, buildOperationSchemas(operation)]),
 );
 
-// Each exported mapper has a different input type. The allowlist pairs it with the
-// corresponding service result; `never` keeps this heterogeneous registry from accepting any.
-type ResultMapper = (value: never) => unknown;
 const pageItemMappers: Record<string, ResultMapper> = {
   'accounts.list': mappers.toAccountResponse,
   'transactions.list': mappers.toTransactionResponse,
@@ -378,7 +352,7 @@ async function invokeService(
 export function registerLibrary(
   server: FastifyInstance,
   services: ApplicationServices,
-  resolveSession: (request: FastifyRequest) => Promise<Record<string, unknown>>,
+  resolveSession: (request: FastifyRequest) => Promise<SandboxIdentity>,
 ): void {
   const limiter = new FixedWindowLimiter();
 
@@ -417,7 +391,7 @@ export function registerLibrary(
       }
 
       // This route sits outside /v1, so it must enforce session and quota checks itself.
-      const identity = (await resolveSession(request)) as unknown as SandboxIdentity;
+      const identity = await resolveSession(request);
       request.tenantId = identity.tenant_id;
       request.apiKeyId = identity.api_key_id;
       const quota = limiter.consume(identity.api_key_id, { maxRequests: 600, windowSeconds: 60 });
@@ -433,11 +407,15 @@ export function registerLibrary(
 
       // Existing panels consume the REST-shaped display result. The journal gets the native
       // library value and actual trusted arguments, with only bigint/Date serialization applied.
-      return {
+      const response: LibraryExecutionResponse = {
         result: serializeForBrowser(toDisplayResult(call.operation, value)),
         value: serializeForBrowser(value),
-        call: { operation: call.operation, input: serializeForBrowser(executedInput) },
+        call: {
+          operation: call.operation,
+          input: serializeForBrowser(executedInput) as LibraryCall['input'],
+        },
       };
+      return response;
     },
   );
 }

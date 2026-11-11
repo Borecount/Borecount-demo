@@ -1,5 +1,6 @@
 import type * as Contract from './generated-contract';
-import { toLibraryCall, type LibraryCall } from '../../../shared/library';
+import { toLibraryCall } from '../../../shared/library';
+import type { LibraryCall, LibraryExecutionResponse } from '../../../shared/library-types';
 
 export {
   libraryCode,
@@ -190,11 +191,7 @@ export async function request<T = Record<string, Json>>(
     if (!response.ok) throw new DemoApiError(status, responseBody);
 
     if (bridgeCall) {
-      const envelope = responseBody as unknown as {
-        result: Json;
-        value: Json;
-        call: LibraryCall;
-      };
+      const envelope = responseBody as unknown as LibraryExecutionResponse<Json>;
 
       // UI consumers receive the display-safe result. The journal keeps the
       // native value so method output and the converted result remain distinct.
