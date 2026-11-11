@@ -27,6 +27,10 @@ A JWT is backed by its API-key record. Every authenticated request rechecks that
 - Client transaction and hold `reference` values are tenant-scoped idempotency keys. Repeating the identical payload returns `200` and `created: false`; reusing a reference with a materially changed posting payload returns `400 INVARIANT_VIOLATION`.
 - Supply `x-request-id` for end-to-end correlation. The service echoes it on the response; otherwise it generates a UUID.
 
+## Adjustment authorization
+
+The host allows adjustments for ADMIN credentials and active sandbox SERVICE credentials. Ordinary SERVICE credentials receive 403. For both allowed roles, `actor_id` must equal the authenticated API-key ID. The sandbox session response exposes this ID as `actor_id` for request construction. The host rejects conflicting actor claims before posting any adjustment.
+
 ## Pagination
 
 List ledgers, accounts, transactions, entries, holds and their lifecycle details, credit grants/lots/lineage, API keys, balance history, and reconciliation rules, uploads, persisted run summaries, and results with cursor pagination:

@@ -24,11 +24,18 @@ function DataTable({ rows }: { rows: Record<string, Json>[] }) {
   return <div className="table-scroll"><table><thead><tr>{columns.map(k => <th key={k}>{k}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={String(row.id ?? i)}>{columns.map(k => <td key={k}>{typeof row[k] === 'object' ? pretty(row[k]) : String(row[k] ?? '—')}</td>)}</tr>)}</tbody></table></div>;
 }
 
-function ReadPanel({ title, path, busy, execute }: { title: string; path: string; busy: boolean; execute: (op: DemoRequest) => Promise<Json | undefined> }) {
+function ReadPanel({ title, path, busy, execute }: { title: string; path: string; busy: boolean; execute: (op: DemoRequest, signal?: AbortSignal) => Promise<Json | undefined> }) {
   const [url, setUrl] = useState(path), [result, setResult] = useState<Json>(null), [where, setWhere] = useState('{}');
   const [continuation, setContinuation] = useState<string | null>(null);
-  useEffect(() => { setUrl(path); setResult(null); setContinuation(null); setWhere('{}'); }, [path]);
+  const activeRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setUrl(path); setResult(null); setContinuation(null); setWhere('{}');
+    return () => activeRequest.current?.abort();
+  }, [path]);
   const load = async (next = false) => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     try {
       const target = new URL(next && continuation ? continuation : url, window.location.origin);
       if (!next) {
@@ -37,16 +44,16 @@ function ReadPanel({ title, path, busy, execute }: { title: string; path: string
         else target.searchParams.delete('where');
         target.searchParams.delete('cursor');
       }
-      const value = await execute({ method: 'GET', path: target.pathname + target.search });
-      if (value === undefined) return;
+      const value = await execute({ method: 'GET', path: target.pathname + target.search }, controller.signal);
+      if (controller.signal.aborted || value === undefined) return;
       setResult(value);
       const body = asObject(value);
       if (typeof body.next_cursor === 'string') { target.searchParams.set('cursor', body.next_cursor); setContinuation(target.pathname + target.search); }
       else setContinuation(null);
-    } catch (e) { setResult({ error: describe(e) }); }
+    } catch (e) { if (!controller.signal.aborted) setResult({ error: describe(e) }); }
   };
   const object = asObject(result);
-  return <section className="panel read-panel"><div className="panel-title"><h2>{title}</h2><span>Canonical API</span></div>
+  return <section className="panel read-panel" aria-label={title}><div className="panel-title"><h2>{title}</h2><span>Canonical API</span></div>
     <label>Request URL<input value={url} onChange={e => { setUrl(e.target.value); setContinuation(null); }} /></label>
     <details className="filter-details"><summary>Server filters · where JSON</summary><p className="muted">Use only fields allowed by this endpoint. Filters are ANDed. Metadata paths are excluded. See API docs for field schemas.</p>
       <textarea aria-label={`${title} filters`} value={where} onChange={e => { setWhere(e.target.value); setContinuation(null); }} rows={4} spellCheck={false} />
@@ -64,29 +71,35 @@ function ReconciliationHistory({ title, path, idField, selectedId, onSelect, bus
 }) {
   const [page, setPage] = useState<Record<string, Json> | null>(null);
   const [nextPath, setNextPath] = useState<string | null>(null);
+  const [pagePaths, setPagePaths] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
-  const load = useCallback(async (requestedPath = path) => {
+  const load = useCallback(async (requestedPath = path, previousPaths: string[] = []) => {
     activeRequest.current?.abort();
     const controller = new AbortController(); activeRequest.current = controller;
     const target = new URL(requestedPath, window.location.origin);
+    setLoading(true);
     try {
       const result = await request<Json>({ method: 'GET', path: target.pathname + target.search }, controller.signal, false);
       if (controller.signal.aborted || !result || typeof result !== 'object' || Array.isArray(result)) return;
       const body = result as Record<string, Json>;
       setLoadError(null);
       setPage(body);
+      setPagePaths([...previousPaths, requestedPath]);
       if (typeof body.next_cursor === 'string') {
         target.searchParams.set('cursor', body.next_cursor);
         setNextPath(target.pathname + target.search);
       } else setNextPath(null);
     } catch (error) { if (!controller.signal.aborted) setLoadError(describe(error)); }
+    finally { if (!controller.signal.aborted) setLoading(false); }
   }, [path]);
-  useEffect(() => { setPage(null); setNextPath(null); void load(path); return () => activeRequest.current?.abort(); }, [load, path]);
+  useEffect(() => { setPage(null); setNextPath(null); setPagePaths([]); void load(path); return () => activeRequest.current?.abort(); }, [load, path]);
   const rows = Array.isArray(page?.data) ? page.data.filter((row): row is Record<string, Json> => !!row && typeof row === 'object' && !Array.isArray(row)) : [];
-  return <section className="panel read-panel"><div className="panel-title"><h2>{title}</h2><span>Newest first · select to reuse</span></div>
-    <div className="actions"><button className="secondary" disabled={busy} onClick={() => void load(path)}>Refresh {title.toLowerCase()}</button>
-      {nextPath && <button className="secondary" disabled={busy} onClick={() => void load(nextPath)}>Next page</button>}</div>
+  return <section className="panel read-panel" aria-label={title}><div className="panel-title"><h2>{title}</h2><span>Newest first · select to reuse</span></div>
+    <div className="actions"><button className="secondary" disabled={busy || loading} onClick={() => void load(path)}>Refresh {title.toLowerCase()}</button>
+      {pagePaths.length > 1 && <button className="secondary" disabled={busy || loading} onClick={() => void load(pagePaths[pagePaths.length - 2], pagePaths.slice(0, -2))}>Previous page</button>}
+      {nextPath && <button className="secondary" disabled={busy || loading} onClick={() => void load(nextPath, pagePaths)}>Next page</button>}</div>
     {loadError && <p className="error" role="alert">{loadError}</p>}
     {page && (rows.length ? <div className="table-scroll"><table><thead><tr><th>ID</th><th>Details</th><th>Created / started</th><th /></tr></thead><tbody>{rows.map((row, index) => {
       const id = row[idField];
@@ -118,13 +131,14 @@ export function App() {
   const [expirationAsOf, setExpirationAsOf] = useState('');
   const [beforeAfter, setBeforeAfter] = useState<{ before: Account[]; after: Account[] } | null>(null);
   const initialized = useRef(false);
+  const executionVersion = useRef(0);
   const refreshVersion = useRef(0);
   const inspectionVersion = useRef(0);
   const balanceController = useRef<AbortController | null>(null);
   const refreshRef = useRef<() => Promise<Account[] | undefined>>(async () => undefined);
   const currency = accounts[0]?.currency ?? (ledgers.find(l => l.id === ledger)?.name.startsWith('EUR') ? 'EUR' : 'USD');
   const scale = session?.assets.find(a => a.code === currency)?.scale ?? 2;
-  const context: Context = { ledger, currency, accounts, ...ids, expirationAsOf };
+  const context: Context = { actor: session?.actor_id ?? '', ledger, currency, accounts, ...ids, expirationAsOf };
   const holdWhere = JSON.stringify({ ledger_id: { eq: ledger }, ...(holdState ? { state: { eq: holdState } } : {}) });
   const journal = records.find(r => r.id === recordId) ?? records[0];
 
@@ -182,10 +196,12 @@ export function App() {
       .then(setBalance).catch(e => { if (!controller.signal.aborted) setError(describe(e)); });
     return () => { controller.abort(); if (balanceController.current === controller) balanceController.current = null; };
   }, [selectedAccount, accounts, ledger, session?.tenant_id]);
-  const execute = async (operation: DemoRequest): Promise<Json | undefined> => {
+  const execute = async (operation: DemoRequest, signal?: AbortSignal): Promise<Json | undefined> => {
+    const version = ++executionVersion.current;
     setBusy(true); setError(null); setCopied(false);
     try {
-      const result = await request<Json>(operation, undefined, true);
+      const result = await request<Json>(operation, signal, true);
+      if (signal?.aborted) return undefined;
       const body = asObject(result);
       if (operation.path === '/v1/credit-grants/expiration/preview' && typeof operation.body?.as_of === 'string') setExpirationAsOf(operation.body.as_of);
       if (operation.method === 'POST' && operation.path.startsWith('/v1/')) {
@@ -207,7 +223,12 @@ export function App() {
         if (operation.path === '/v1/ledgers') setLedgers(await allPages<Ledger>('/v1/ledgers?limit=200'));
       }
       return result;
-    } catch (e) { setError(describe(e)); return undefined; } finally { setBusy(false); }
+    } catch (e) { if (!signal?.aborted && version === executionVersion.current) setError(describe(e)); return undefined; }
+    finally { if (version === executionVersion.current) setBusy(false); }
+  };
+  const selectReconciliationId = (key: 'upload' | 'rule' | 'run', id: string) => {
+    setIds(old => ({ ...old, [key]: id }));
+    setPreset(null);
   };
   const choose = (op: Operation) => {
     const draft = op.build(context, ref()); setPreset(op); setDraftPath(draft.path); setDraftMethod(draft.method); setDraftBody(pretty(draft.body ?? {}));
@@ -322,12 +343,15 @@ export function App() {
 
     {area === 'Reconciliation' && session && ledger && <>
       <section className="panel"><p className="eyebrow">PROVIDER STATEMENT ↔ LEDGER</p><h2>Make differences explainable.</h2><p>Create rules, upload normalized records, preview matching and persist a report. Review matched, mismatched, unmatched external/internal and conflict results.</p>
-        <div className="field-grid">{(['upload', 'rule', 'run'] as const).map(key => <label key={key}>{key} ID<input aria-label={`${key} ID`} value={ids[key]} placeholder="Filled by the corresponding API response" onChange={e => setIds(old => ({ ...old, [key]: e.target.value }))} /></label>)}</div>
-        <p className="muted">Matching strategy: one_to_one. Use amount_tolerance_minor and date_tolerance_seconds inside rule criteria. CSV import is converted locally to the documented JSON request.</p></section>
+        <div className="field-grid">{(['upload', 'rule', 'run'] as const).map(key => <label key={key}>{key} ID<input aria-label={`${key} ID`} value={ids[key]} placeholder="Filled by the corresponding API response" onChange={e => selectReconciliationId(key, e.target.value)} /></label>)}</div>
+        <p className="muted">Selecting an ID closes the current request draft. Choose an operation to use the selected IDs. Matching strategy: one_to_one. Use amount_tolerance_minor and date_tolerance_seconds inside rule criteria. CSV import is converted locally to the documented JSON request.</p></section>
       <ReadPanel title="Matching rules" path="/v1/reconciliation/matching-rules?limit=25" execute={execute} busy={busy} />
-      <ReconciliationHistory key={`uploads:${session?.tenant_id ?? ''}:${reconciliationHistoryRevision}`} title="Saved uploads" path="/v1/reconciliation/uploads?limit=25" idField="upload_id" selectedId={ids.upload} onSelect={upload => setIds(old => ({ ...old, upload }))} busy={busy} />
-      <ReconciliationHistory key={`runs:${session?.tenant_id ?? ''}:${ledger}:${reconciliationHistoryRevision}`} title="Saved runs" path={query('/v1/reconciliation/runs', { where: JSON.stringify({ ledger_id: { eq: ledger } }), limit: 25 })} idField="id" selectedId={ids.run} onSelect={run => setIds(old => ({ ...old, run }))} busy={busy} />
-      {ids.run && <ReadPanel title="Reconciliation results" path={`/v1/reconciliation/runs/${ids.run}/results?limit=25`} execute={execute} busy={busy} />}
+      <ReconciliationHistory key={`uploads:${session?.tenant_id ?? ''}:${reconciliationHistoryRevision}`} title="Saved uploads" path="/v1/reconciliation/uploads?limit=25" idField="upload_id" selectedId={ids.upload} onSelect={upload => selectReconciliationId('upload', upload)} busy={busy} />
+      <ReconciliationHistory key={`runs:${session?.tenant_id ?? ''}:${ledger}:${reconciliationHistoryRevision}`} title="Saved runs" path={query('/v1/reconciliation/runs', { where: JSON.stringify({ ledger_id: { eq: ledger } }), limit: 25 })} idField="id" selectedId={ids.run} onSelect={run => selectReconciliationId('run', run)} busy={busy} />
+      {ids.run && <>
+        <ReadPanel key={`report:${session.tenant_id}:${ids.run}`} title="Run report" path={`/v1/reconciliation/runs/${ids.run}`} execute={execute} busy={busy} />
+        <ReadPanel key={`results:${session.tenant_id}:${ids.run}`} title="Reconciliation results" path={`/v1/reconciliation/runs/${ids.run}/results?limit=25`} execute={execute} busy={busy} />
+      </>}
     </>}
 
     {area === 'Reports' && <>

@@ -37,6 +37,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     expires_in: jwt.accessTokenTtlSeconds,
     session_expires_at: new Date(row.expires_at).toISOString(),
     tenant_id: row.tenant_id,
+    actor_id: row.api_key_id,
     assets: (await services.assets.list({ tenantId: row.tenant_id, limit: 200 })).data.map(asset => ({ code: asset.code, scale: asset.scale })),
   });
 

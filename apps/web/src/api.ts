@@ -8,7 +8,7 @@ export type Account = Contract.Account;
 export type Entry = Contract.EntriesPage['data'][number];
 export type Transaction = Contract.Transaction;
 export type Hold = Contract.HoldSummary;
-export interface Session { access_token: string; expires_in: number; tenant_id: string; session_expires_at: string; assets: { code: string; scale: number }[]; }
+export interface Session { access_token: string; expires_in: number; tenant_id: string; actor_id: string; session_expires_at: string; assets: { code: string; scale: number }[]; }
 export type Balance = Contract.BalanceAsOfResponse;
 export class DemoApiError extends Error {
   constructor(public status: number, public payload: Json) { super(typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? `${payload.error ?? 'ERROR'}: ${payload.message ?? 'Request failed'}` : 'Request failed'); }

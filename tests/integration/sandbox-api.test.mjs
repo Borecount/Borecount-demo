@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import postgres from 'postgres';
+import { createHash } from 'node:crypto';
+import { generateApiKey } from '@borecount/core/application';
 // Run against the dedicated integration API started by demo-api.test.mjs.
 export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL_TEST ?? 'postgresql://luxledger:luxledger@127.0.0.1:5433/luxledger_demo_test') {
   assert.equal(new URL(databaseUrl).pathname, '/luxledger_demo_test');
@@ -174,7 +176,35 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   }
   assert.ok(statementPages > 1); assert.equal(opening + availableDelta, closing);
   await call('GET', `/v1/accounts/${id('credits:alice')}/credit-statement?from=1970-01-01T00:00:00.000Z&as_of=${encodeURIComponent(new Date(Date.now()+3*86400000).toISOString())}`, undefined, 200);
-  await call('POST', '/v1/adjustments/credit', { ledger_id: ledger.id, account_id: id('wallet:alice'), offset_account_id: id('system:funding'), reference: 'adjust-credit', amount_minor: '100', description: 'Correction', actor_id: 'demo-operator', reason_code: 'PROVIDER_DIFFERENCE' }, 201);
+  const adjustment = { ledger_id: ledger.id, account_id: id('wallet:alice'), offset_account_id: id('system:funding'), reference: 'adjust-credit', amount_minor: '100', description: 'Correction', actor_id: first.actor_id, reason_code: 'PROVIDER_DIFFERENCE' };
+  const adjustmentSql = postgres(databaseUrl, { max: 1 });
+  try {
+    assert.ok(first.actor_id);
+    for (const direction of ['credit', 'debit']) {
+      await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `forged-${direction}`, actor_id: 'someone-else' }, 403);
+      await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `adjust-${direction}` }, 201);
+    }
+    // An ordinary SERVICE key has no sandbox exception, even in a sandbox tenant.
+    for (const role of ['SERVICE', 'ADMIN']) {
+      const rawKey = generateApiKey();
+      const keyHash = createHash('sha256').update(rawKey).digest('hex');
+      const [key] = await adjustmentSql`insert into api_keys (tenant_id, name, role, key_hash)
+        values (${first.tenant_id}, ${`Review ${role}`}, ${role}, ${keyHash}) returning id`;
+      const auth = await fetch(apiUrl + '/v1/auth/token', { method: 'POST', headers: { 'x-api-key': rawKey } });
+      assert.equal(auth.status, 200);
+      token = (await auth.json()).access_token;
+      for (const direction of ['credit', 'debit']) {
+        await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `${role}-forged-${direction}`, actor_id: 'someone-else' }, 403);
+        await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `${role}-${direction}`, actor_id: key.id }, role === 'ADMIN' ? 201 : 403);
+      }
+    }
+    const [rejected] = await adjustmentSql`select count(*)::int as count from transactions
+      where reference like 'forged-%' or reference like '%-forged-%' or reference in ('SERVICE-credit', 'SERVICE-debit')`;
+    assert.equal(rejected.count, 0, 'Denied adjustments must not post transactions');
+  } finally {
+    token = firstToken;
+    await adjustmentSql.end({ timeout: 5 });
+  }
   const rule = (await call('POST', '/v1/reconciliation/matching-rules', { name: 'Reference amount', criteria: [{ field: 'reference', operator: 'equals' }, { field: 'amount', operator: 'equals' }, { field: 'currency', operator: 'equals' }] }, 201)).body;
   const upload = (await call('POST', '/v1/reconciliation/external-records', { source: 'sandbox-bank', records: [{ id: 'bank-opening', reference: `sandbox-${currency}-opening`, currency, amount_minor: '10000', date: new Date().toISOString() }, { id: 'bank-missing', reference: 'missing', currency, amount_minor: '99', date: new Date().toISOString() }] }, 201)).body;
   const uploadsPage = (await call('GET', `/v1/reconciliation/uploads?limit=1&where=${encodeURIComponent(JSON.stringify({ source: { eq: 'sandbox-bank' } }))}`, undefined, 200)).body;

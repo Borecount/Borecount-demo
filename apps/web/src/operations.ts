@@ -1,6 +1,6 @@
 import type { Account, DemoRequest, Json } from './api';
 export type Area = 'Accounts' | 'Transactions' | 'Holds' | 'Credits' | 'Reconciliation' | 'Reports';
-export interface Context { ledger: string; currency: string; accounts: Account[]; tx: string; hold: string; grant: string; upload: string; rule: string; run: string; expirationAsOf: string; }
+export interface Context { actor: string; ledger: string; currency: string; accounts: Account[]; tx: string; hold: string; grant: string; upload: string; rule: string; run: string; expirationAsOf: string; }
 export interface Operation { id: string; area: Area; title: string; help: string; build: (c: Context, ref: string) => DemoRequest; }
 type SeedRole = 'funding' | 'primary' | 'secondary' | 'fees' | 'credits' | 'usage';
 const account = (c: Context, role: SeedRole) => c.accounts.find(a => a.code === `DEMO_${role.toUpperCase()}`)?.id
@@ -53,7 +53,7 @@ export const operations: Operation[] = [
   { id: 'reconcile-preview', area: 'Reconciliation', title: 'Dry run reconciliation', help: 'Create a rule and upload first. Preview matching without persisting results.', build: c => post('/v1/reconciliation/runs', { ledger_id: c.ledger, upload_id: c.upload, strategy: 'one_to_one', matching_rule_ids: [c.rule], dry_run: true }) },
   { id: 'reconcile', area: 'Reconciliation', title: 'Run reconciliation', help: 'Persist a report, then inspect and filter paginated results.', build: c => post('/v1/reconciliation/runs', { ledger_id: c.ledger, upload_id: c.upload, strategy: 'one_to_one', matching_rule_ids: [c.rule], dry_run: false }) },
   { id: 'recon-results', area: 'Reconciliation', title: 'Reconciliation results', help: 'Filter by status using where; every category is retained in the report.', build: c => get(`/v1/reconciliation/runs/${c.run}/results?limit=25`) },
-  ...(['credit', 'debit'] as const).map(direction => ({ id: `adjust-${direction}`, area: 'Reconciliation' as const, title: `${direction === 'credit' ? 'Credit' : 'Debit'} adjustment`, help: 'Post a balanced manual adjustment with immutable reason and actor audit data.', build: (c: Context, r: string) => post(`/v1/adjustments/${direction}`, { ledger_id: c.ledger, account_id: account(c, 'primary'), offset_account_id: account(c, 'funding'), reference: r, amount_minor: '100', description: 'Provider reconciliation adjustment', reason_code: 'PROVIDER_DIFFERENCE', actor_id: 'finance-demo-operator', attributes: { ticket_id: 'FIN-1042' } }) })),
+  ...(['credit', 'debit'] as const).map(direction => ({ id: `adjust-${direction}`, area: 'Reconciliation' as const, title: `${direction === 'credit' ? 'Credit' : 'Debit'} adjustment`, help: 'Post a balanced manual adjustment with immutable reason and actor audit data.', build: (c: Context, r: string) => post(`/v1/adjustments/${direction}`, { ledger_id: c.ledger, account_id: account(c, 'primary'), offset_account_id: account(c, 'funding'), reference: r, amount_minor: '100', description: 'Provider reconciliation adjustment', reason_code: 'PROVIDER_DIFFERENCE', actor_id: c.actor, attributes: { ticket_id: 'FIN-1042' } }) })),
 ];
 export const scenarios = [
   { name: 'Wallet', summary: 'Fund a wallet, pay another customer, retry safely and inspect insufficient funds.', steps: ['fund', 'transfer', 'overdraft'] },
