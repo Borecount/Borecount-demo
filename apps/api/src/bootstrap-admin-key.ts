@@ -1,4 +1,4 @@
-import { createApiKeyService, createDbClient } from '@borecount/postgres-adapter';
+import { createDbClient, createTenantProvisioningService } from '@borecount/postgres-adapter';
 import { isMainModule } from './utils/is-main-module';
 
 const requireEnv = (name: string): string => {
@@ -11,16 +11,16 @@ const requireEnv = (name: string): string => {
 
 export const run = async (): Promise<void> => {
   const dbClient = createDbClient();
-  const apiKeyService = createApiKeyService(dbClient);
+  const provisioning = createTenantProvisioningService(dbClient);
 
   try {
-    const result = await apiKeyService.bootstrapInitialAdmin({
+    const result = await provisioning.bootstrapInitialAdmin({
       tenantName: requireEnv('BOOTSTRAP_TENANT_NAME'),
       keyName: process.env.BOOTSTRAP_ADMIN_KEY_NAME ?? 'Initial admin key',
       rawApiKey: requireEnv('BOOTSTRAP_ADMIN_API_KEY'),
     });
 
-    if (!result.created) {
+    if (!result || !result.created) {
       console.log('Bootstrap skipped: api_keys already contains records');
       return;
     }
@@ -30,7 +30,7 @@ export const run = async (): Promise<void> => {
         {
           created: true,
           tenantId: result.tenantId,
-          apiKeyId: result.apiKeyId,
+          apiKeyId: result.key.id,
         },
         null,
         2,

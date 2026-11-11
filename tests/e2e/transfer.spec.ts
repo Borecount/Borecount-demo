@@ -179,7 +179,7 @@ test('credits expose grant issuance, consumption, partial refunds and lineage', 
   expect(run.as_of).toBe(refreshed.as_of);
 });
 
-test('finance imports CSV, creates rules and reports external differences', async ({ page }) => {
+test('finance imports CSV and restores saved reconciliation after reload', async ({ page }) => {
   await ready(page); await tab(page, 'Reconciliation');
   await preset(page, 'Create matching rule');
   await expect(page.getByLabel('rule ID')).not.toHaveValue('');
@@ -193,6 +193,91 @@ test('finance imports CSV, creates rules and reports external differences', asyn
   await preset(page, 'Run reconciliation');
   await expect(page.getByLabel('run ID')).not.toHaveValue('');
   await expect(page.getByRole('region', { name: 'Request journal' })).toContainText('"unmatched_external_count": 1');
+  const uploadId = await page.getByLabel('upload ID').inputValue();
+  const runId = await page.getByLabel('run ID').inputValue();
+
+  await page.reload();
+  await expect(page.getByTestId('account-wallet:alice')).toContainText('100.00 USD');
+  await tab(page, 'Reconciliation');
+  await expect(page.getByLabel('upload ID')).toHaveValue('');
+  await expect(page.getByLabel('run ID')).toHaveValue('');
+  for (const [label, id] of [['upload ID', uploadId], ['run ID', runId]] as const) {
+    await page.getByRole('row').filter({ hasText: id }).getByRole('button', { name: 'Select' }).click();
+    await expect(page.getByLabel(label)).toHaveValue(id);
+  }
+
+  await page.getByRole('button', { name: 'Load run report' }).click();
+  const report = page.getByRole('region', { name: 'Run report', exact: true });
+  await expect(report).toContainText(uploadId);
+  for (const field of ['matching_rule_ids', 'matched_count', 'unmatched_external_count', 'unmatched_internal_count', 'mismatched_count', 'conflict_count']) {
+    await expect(report).toContainText(field);
+  }
+
+  const resultsResponse = page.waitForResponse(response =>
+    response.request().method() === 'GET' &&
+    new URL(response.url()).pathname === `/v1/reconciliation/runs/${runId}/results`,
+  );
+  await page.getByRole('button', { name: 'Load reconciliation results' }).click();
+  expect((await resultsResponse).status()).toBe(200);
+  await expect(page.getByRole('cell', { name: 'unmatched_external', exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('saved reconciliation pages go back, selections invalidate drafts and stale results are cancelled', async ({ page }) => {
+  const uploadIds = ['00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000102'];
+  const runIds = ['00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000202'];
+  let markOldRequested!: () => void, releaseOld!: () => void, markOldFinished!: () => void;
+  const oldRequested = new Promise<void>(resolve => { markOldRequested = resolve; });
+  const oldBlocked = new Promise<void>(resolve => { releaseOld = resolve; });
+  const oldFinished = new Promise<void>(resolve => { markOldFinished = resolve; });
+  await page.route('**/v1/reconciliation/uploads?*', async route => {
+    const older = new URL(route.request().url()).searchParams.has('cursor');
+    await route.fulfill({ json: {
+      data: [{ upload_id: uploadIds[older ? 1 : 0], source: older ? 'older-upload' : 'newer-upload', record_count: 2, created_at: '2026-11-01T00:00:00Z' }],
+      next_cursor: older ? null : 'older',
+    } });
+  });
+  await page.route('**/v1/reconciliation/runs?*', route => route.fulfill({ json: {
+    data: runIds.map(id => ({ id, status: 'completed', matched_count: 1, started_at: '2026-11-01T00:00:00Z' })), next_cursor: null,
+  } }));
+  await page.route('**/v1/reconciliation/runs/*/results?*', async route => {
+    const old = route.request().url().includes(runIds[0]);
+    if (old) { markOldRequested(); await oldBlocked; }
+    try {
+      await route.fulfill({ json: { data: [{ id: old ? 'previous-run-result' : 'current-run-result', status: 'matched' }], next_cursor: null } });
+    } catch (error) {
+      if (!old) throw error; // The first request may already have been aborted.
+    } finally { if (old) markOldFinished(); }
+  });
+  await ready(page); await tab(page, 'Reconciliation');
+  const uploads = page.getByRole('region', { name: 'Saved uploads', exact: true });
+  await expect(uploads).toContainText('newer-upload');
+  await uploads.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(uploads).toContainText('older-upload');
+  await uploads.getByRole('button', { name: 'Previous page', exact: true }).click();
+  await expect(uploads).toContainText('newer-upload');
+  await page.getByRole('button', { name: 'Run reconciliation', exact: true }).click();
+  await expect(page.getByLabel('Request JSON')).toBeVisible();
+  await uploads.getByRole('button', { name: 'Next page', exact: true }).click();
+  await uploads.getByRole('button', { name: 'Select', exact: true }).click();
+  await expect(page.getByLabel('Request JSON')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send request', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Run reconciliation', exact: true }).click();
+  await expect(page.getByLabel('Request JSON')).toContainText(uploadIds[1]);
+
+  const runs = page.getByRole('region', { name: 'Saved runs', exact: true });
+  await runs.getByRole('row').filter({ hasText: runIds[0] }).getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('button', { name: 'Load reconciliation results', exact: true }).click();
+  await oldRequested;
+  await runs.getByRole('row').filter({ hasText: runIds[1] }).getByRole('button', { name: 'Select', exact: true }).click();
+  await expect(page.getByLabel('run ID')).toHaveValue(runIds[1]);
+  await page.getByRole('button', { name: 'Load reconciliation results', exact: true }).click();
+  const results = page.getByRole('region', { name: 'Reconciliation results', exact: true });
+  await expect(results).toContainText('current-run-result');
+  releaseOld();
+  await oldFinished;
+  await expect(results).not.toContainText('previous-run-result');
+  await expect(results).toContainText('current-run-result');
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 

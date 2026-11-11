@@ -5,4 +5,4 @@ export {
   RepositoryError,
   TransactionNotFoundError,
   UnauthorizedError,
-} from '@borecount/core/application';
+} from '@borecount/core/errors';

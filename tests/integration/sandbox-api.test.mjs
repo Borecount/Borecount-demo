@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import postgres from 'postgres';
+import { createHash } from 'node:crypto';
+import { generateApiKey } from '@borecount/core/application';
 // Run against the dedicated integration API started by demo-api.test.mjs.
 export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL_TEST ?? 'postgresql://luxledger:luxledger@127.0.0.1:5433/luxledger_demo_test') {
   assert.equal(new URL(databaseUrl).pathname, '/luxledger_demo_test');
@@ -21,6 +23,33 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   const first = (await call('POST', '/demo/session', undefined, 201)).body;
   assert.ok(first.access_token); token = first.access_token;
   const firstCookie = cookie, firstToken = token;
+  // A late session-table failure must roll back provisioning and all opening data.
+  const provisioningSql = postgres(databaseUrl, { max: 1 });
+  try {
+    const counts = () => provisioningSql`select
+      (select count(*) from tenants) as tenants,
+      (select count(*) from api_keys) as keys,
+      (select count(*) from assets) as assets,
+      (select count(*) from ledgers) as ledgers,
+      (select count(*) from accounts) as accounts,
+      (select count(*) from transactions) as transactions,
+      (select count(*) from demo_sessions) as sessions`;
+    const before = await counts();
+    await provisioningSql.unsafe(`create function reject_test_session() returns trigger language plpgsql as $$
+      begin raise exception 'Injected session insert failure'; end;
+    $$`);
+    await provisioningSql.unsafe('create trigger reject_test_session before insert on demo_sessions for each row execute function reject_test_session()');
+    await call('POST', '/demo/session', undefined, 500);
+    assert.deepEqual(await counts(), before, 'Failed sandbox must leave no partial tenant or opening data');
+    assert.equal(cookie, firstCookie);
+    assert.equal((await call('GET', '/demo/session', undefined, 200)).body.tenant_id, first.tenant_id);
+    await call('GET', '/v1/ledgers', undefined, 200);
+  } finally {
+    await provisioningSql.unsafe('drop trigger if exists reject_test_session on demo_sessions');
+    await provisioningSql.unsafe('drop function if exists reject_test_session()');
+    await provisioningSql.end({ timeout: 5 });
+  }
+
   const ledgers = (await call('GET', '/v1/ledgers?limit=1', undefined, 200)).body;
   assert.equal(ledgers.data.length, 1); assert.ok(ledgers.next_cursor);
   const secondPage = (await call('GET', '/v1/ledgers?limit=1&cursor=' + encodeURIComponent(ledgers.next_cursor), undefined, 200)).body;
@@ -147,12 +176,54 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   }
   assert.ok(statementPages > 1); assert.equal(opening + availableDelta, closing);
   await call('GET', `/v1/accounts/${id('credits:alice')}/credit-statement?from=1970-01-01T00:00:00.000Z&as_of=${encodeURIComponent(new Date(Date.now()+3*86400000).toISOString())}`, undefined, 200);
-  await call('POST', '/v1/adjustments/credit', { ledger_id: ledger.id, account_id: id('wallet:alice'), offset_account_id: id('system:funding'), reference: 'adjust-credit', amount_minor: '100', description: 'Correction', actor_id: 'demo-operator', reason_code: 'PROVIDER_DIFFERENCE' }, 201);
+  const adjustment = { ledger_id: ledger.id, account_id: id('wallet:alice'), offset_account_id: id('system:funding'), reference: 'adjust-credit', amount_minor: '100', description: 'Correction', actor_id: first.actor_id, reason_code: 'PROVIDER_DIFFERENCE' };
+  const adjustmentSql = postgres(databaseUrl, { max: 1 });
+  try {
+    assert.ok(first.actor_id);
+    for (const direction of ['credit', 'debit']) {
+      await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `forged-${direction}`, actor_id: 'someone-else' }, 403);
+      await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `adjust-${direction}` }, 201);
+    }
+    // An ordinary SERVICE key has no sandbox exception, even in a sandbox tenant.
+    for (const role of ['SERVICE', 'ADMIN']) {
+      const rawKey = generateApiKey();
+      const keyHash = createHash('sha256').update(rawKey).digest('hex');
+      const [key] = await adjustmentSql`insert into api_keys (tenant_id, name, role, key_hash)
+        values (${first.tenant_id}, ${`Review ${role}`}, ${role}, ${keyHash}) returning id`;
+      const auth = await fetch(apiUrl + '/v1/auth/token', { method: 'POST', headers: { 'x-api-key': rawKey } });
+      assert.equal(auth.status, 200);
+      token = (await auth.json()).access_token;
+      for (const direction of ['credit', 'debit']) {
+        await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `${role}-forged-${direction}`, actor_id: 'someone-else' }, 403);
+        await call('POST', `/v1/adjustments/${direction}`, { ...adjustment, reference: `${role}-${direction}`, actor_id: key.id }, role === 'ADMIN' ? 201 : 403);
+      }
+    }
+    const [rejected] = await adjustmentSql`select count(*)::int as count from transactions
+      where reference like 'forged-%' or reference like '%-forged-%' or reference in ('SERVICE-credit', 'SERVICE-debit')`;
+    assert.equal(rejected.count, 0, 'Denied adjustments must not post transactions');
+  } finally {
+    token = firstToken;
+    await adjustmentSql.end({ timeout: 5 });
+  }
   const rule = (await call('POST', '/v1/reconciliation/matching-rules', { name: 'Reference amount', criteria: [{ field: 'reference', operator: 'equals' }, { field: 'amount', operator: 'equals' }, { field: 'currency', operator: 'equals' }] }, 201)).body;
   const upload = (await call('POST', '/v1/reconciliation/external-records', { source: 'sandbox-bank', records: [{ id: 'bank-opening', reference: `sandbox-${currency}-opening`, currency, amount_minor: '10000', date: new Date().toISOString() }, { id: 'bank-missing', reference: 'missing', currency, amount_minor: '99', date: new Date().toISOString() }] }, 201)).body;
+  const uploadsPage = (await call('GET', `/v1/reconciliation/uploads?limit=1&where=${encodeURIComponent(JSON.stringify({ source: { eq: 'sandbox-bank' } }))}`, undefined, 200)).body;
+  assert.equal(uploadsPage.data.length, 1); assert.equal(uploadsPage.data[0].upload_id, upload.upload_id);
   const run = (await call('POST', '/v1/reconciliation/runs', { ledger_id: ledger.id, upload_id: upload.upload_id, matching_rule_ids: [rule.id], strategy: 'one_to_one', dry_run: false }, 201)).body;
   assert.equal(run.matched_count, 1); assert.equal(run.unmatched_external_count, 1);
+  const runFilter = encodeURIComponent(JSON.stringify({ ledger_id: { eq: ledger.id }, upload_id: { eq: upload.upload_id }, status: { eq: 'completed' } }));
+  const runsPage = (await call('GET', `/v1/reconciliation/runs?limit=1&where=${runFilter}`, undefined, 200)).body;
+  assert.equal(runsPage.data.length, 1); assert.equal(runsPage.data[0].id, run.id); assert.equal('results' in runsPage.data[0], false);
   await call('GET', `/v1/reconciliation/runs/${run.id}/results?where=${encodeURIComponent(JSON.stringify({ status: { eq: 'matched' } }))}`, undefined, 200);
+  const resultsQuery = `/v1/reconciliation/runs/${run.id}/results?limit=1`;
+  const resultPage = (await call('GET', resultsQuery, undefined, 200)).body;
+  assert.equal(resultPage.data.length, 1); assert.ok(resultPage.next_cursor);
+  const resultNextPage = (await call('GET', `${resultsQuery}&cursor=${encodeURIComponent(resultPage.next_cursor)}`, undefined, 200)).body;
+  assert.equal(resultNextPage.data.length, 1);
+  assert.ok(resultNextPage.next_cursor === null || typeof resultNextPage.next_cursor === 'string');
+  const dryRun = (await call('POST', '/v1/reconciliation/runs', { ledger_id: ledger.id, upload_id: upload.upload_id, matching_rule_ids: [rule.id], strategy: 'one_to_one', dry_run: true }, 200)).body;
+  const persistedDryRun = (await call('GET', `/v1/reconciliation/runs?where=${encodeURIComponent(JSON.stringify({ id: { eq: dryRun.id } }))}`, undefined, 200)).body;
+  assert.equal(persistedDryRun.data.length, 0);
   await call('GET', '/v1/admin/api-keys', undefined, 403);
   await call('GET', '/v1/accounts?where=' + encodeURIComponent('{"metadata":{"eq":"x"}}'), undefined, 400);
   // A second browser has its own tenant and cannot read or mutate the first browser's resources.
@@ -163,6 +234,8 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   await call('GET', `/v1/accounts/${id('wallet:alice')}`, undefined, 404);
   await call('POST', `/v1/holds/${hold.hold_id}/void`, undefined, 404);
   assert.equal((await call('GET', `/v1/holds?where=${holdWhere}`, undefined, 200)).body.data.length, 0);
+  assert.equal((await call('GET', '/v1/reconciliation/uploads', undefined, 200)).body.data.length, 0);
+  assert.equal((await call('GET', '/v1/reconciliation/runs', undefined, 200)).body.data.length, 0);
   cookie = firstCookie; token = firstToken;
   const reset = (await call('POST', '/demo/session', undefined, 201)).body;
   assert.notEqual(reset.tenant_id, first.tenant_id);

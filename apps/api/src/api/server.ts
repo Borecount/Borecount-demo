@@ -12,14 +12,16 @@ import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
 import type { EndpointRateLimitConfig, RateLimitConfig } from '@api/rate-limit/policy';
 import type { CreateServerCoreOptions } from '@api/server-types';
 import type { ApplicationServices } from '@borecount/core/application';
-import { ApiKeyRole, ForbiddenError, UnauthorizedError } from '@borecount/core/application';
+import { ApiKeyRole } from '@borecount/core/application';
+import { ForbiddenError, UnauthorizedError } from '@borecount/core/errors';
+import type { AdjustmentAuthorizationHook } from '@borecount/http/route-core';
 import { registerLedgerAdapter } from '@borecount/fastify-routes';
 import {
   type AuthTokenRequestHeaders,
   type AuthTokenResponse,
   authTokenResponseSchema,
 } from '@borecount/http/contracts';
-import Fastify, { LogController, type FastifyInstance } from 'fastify';
+import Fastify, { LogController, type FastifyInstance, type FastifyRequest } from 'fastify';
 
 const API_KEY_HEADER = 'x-api-key';
 const BEARER_PREFIX = 'Bearer ';
@@ -293,10 +295,12 @@ export const registerApplication = (
     services,
     jwtAuth,
     rateLimit,
+    authorizeAdjustment,
   }: {
     services: ApplicationServices;
     jwtAuth: JwtAuthConfig;
     rateLimit: RateLimitConfig;
+    authorizeAdjustment: AdjustmentAuthorizationHook<FastifyRequest>;
   },
 ): void => {
   const rateLimiter = new FixedWindowLimiter();
@@ -468,5 +472,5 @@ export const registerApplication = (
     },
   );
 
-  registerLedgerAdapter(server, services);
+  registerLedgerAdapter(server, services, { authorizeAdjustment });
 };

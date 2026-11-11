@@ -27,16 +27,23 @@ A JWT is backed by its API-key record. Every authenticated request rechecks that
 - Client transaction and hold `reference` values are tenant-scoped idempotency keys. Repeating the identical payload returns `200` and `created: false`; reusing a reference with a materially changed posting payload returns `400 INVARIANT_VIOLATION`.
 - Supply `x-request-id` for end-to-end correlation. The service echoes it on the response; otherwise it generates a UUID.
 
+## Adjustment authorization
+
+The host allows adjustments for ADMIN credentials and active sandbox SERVICE credentials. Ordinary SERVICE credentials receive 403. For both allowed roles, `actor_id` must equal the authenticated API-key ID. The sandbox session response exposes this ID as `actor_id` for request construction. The host rejects conflicting actor claims before posting any adjustment.
+
 ## Pagination
 
-List ledgers, accounts, transactions, entries, holds and their lifecycle details, credit grants/lots/lineage, API keys, balance history, and reconciliation rules/results with cursor pagination:
+List ledgers, accounts, transactions, entries, holds and their lifecycle details, credit grants/lots/lineage, API keys, balance history, and reconciliation rules, uploads, persisted run summaries, and results with cursor pagination:
 
 ```http
 GET /v1/transactions?ledger_id=<uuid>&limit=50
 GET /v1/transactions?ledger_id=<uuid>&limit=50&cursor=<opaque-next_cursor>
+GET /v1/reconciliation/uploads?limit=50&where=%7B%22source%22%3A%7B%22eq%22%3A%22bank-feed%22%7D%7D
+GET /v1/reconciliation/runs?limit=50&where=%7B%22ledger_id%22%3A%7B%22eq%22%3A%22<uuid>%22%7D%7D
+GET /v1/reconciliation/runs/<uuid>/results?limit=50&cursor=<opaque-next_cursor>
 ```
 
-`limit` defaults to 50 and accepts 1–200. Treat `next_cursor` as opaque: pass it unchanged and do not decode, persist business meaning from, or construct it. `next_cursor: null` means the page is final. A malformed/stale cursor produces `400`. All these lists return `{ "data": [...], "next_cursor": "..." }`. Continue with `cursor=next_cursor` until it is `null`. Version 0.5.0 also supports typed `where` filters; see the OpenAPI schema for the fields allowed by each endpoint.
+`limit` defaults to 50 and accepts 1–200. Treat `next_cursor` as opaque: pass it unchanged and do not decode, persist business meaning from, or construct it. `next_cursor: null` means the page is final. A malformed/stale cursor produces `400`. All these lists return `{ "data": [...], "next_cursor": "..." }`. Continue with `cursor=next_cursor` until it is `null`. Uploads are newest first and can be filtered by `id`, `source`, or `created_at`. Runs are newest first and can be filtered by `id`, `ledger_id`, `upload_id`, `status`, or `started_at`; summaries omit `results`, which remain available through the bounded results endpoint. Dry runs are transient and do not appear in run history. Typed `where` filters are endpoint-specific; see OpenAPI for supported fields and operators.
 
 ## Error envelope
 

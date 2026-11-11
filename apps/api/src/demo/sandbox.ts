@@ -1,8 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { AccountSide, ApiKeyRole, UnauthorizedError, type ApplicationServices } from '@borecount/core/application';
+import { AccountSide, ApiKeyRole, generateApiKey, type ApplicationServices } from '@borecount/core/application';
+import { UnauthorizedError } from '@borecount/core/errors';
 import { OverdraftPolicy } from '@borecount/core/account';
-import type { DbClient } from '@borecount/postgres-adapter';
+import { generateUuidV7, TenantId } from '@borecount/core/base';
+import { createUnitOfWork, type DbClient } from '@borecount/postgres-adapter';
+import { demoSessions } from './schema';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import { RateLimitExceededError } from '../api/errors';
@@ -19,6 +22,7 @@ const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split('
 
 export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig) {
   const limiter = new FixedWindowLimiter();
+  const unitOfWork = createUnitOfWork(db);
   const session = async (request: FastifyRequest) => {
     const secret = cookieValue(request);
     if (!secret || !/^[a-f0-9]{64}$/.test(secret)) throw new UnauthorizedError('Start a demo session first');
@@ -33,6 +37,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     expires_in: jwt.accessTokenTtlSeconds,
     session_expires_at: new Date(row.expires_at).toISOString(),
     tenant_id: row.tenant_id,
+    actor_id: row.api_key_id,
     assets: (await services.assets.list({ tenantId: row.tenant_id, limit: 200 })).data.map(asset => ({ code: asset.code, scale: asset.scale })),
   });
 
@@ -60,17 +65,19 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     if (!decision.allowed) throw new RateLimitExceededError(decision.retryAfterSeconds);
     const secret = randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + SESSION_SECONDS * 1000);
-    const row = await db.sql.begin(async sql => {
-      const [tenant] = await sql.unsafe("insert into tenants (name) values ('Interactive sandbox') returning id");
-      const [key] = await sql.unsafe("insert into api_keys (tenant_id, name, role, key_hash) values ($1, 'Sandbox service', 'SERVICE', $2) returning id", [tenant.id, hash(randomBytes(32).toString('hex'))]);
-      const [created] = await sql.unsafe('insert into demo_sessions (token_hash, tenant_id, api_key_id, expires_at) values ($1, $2, $3, $4) returning *', [hash(secret), tenant.id, key.id, expires.toISOString()]);
-      return created;
-    });
-    try {
+    const command = {
+      tenantId: generateUuidV7(new Date()),
+      tenantName: 'Interactive sandbox',
+      keyName: 'Sandbox service',
+      role: ApiKeyRole.SERVICE,
+      rawApiKey: generateApiKey(),
+    };
+    const row = await unitOfWork.run(new TenantId(command.tenantId), async ({ provisioning, services, tx }) => {
+      const provisioned = await provisioning.provisionTenant(command);
       for (const code of ['USD', 'EUR'] as const) {
         const profile = sandboxProfiles[code];
-        await services.assets.create({ tenantId: row.tenant_id, code, scale: 2 });
-        const ledger = await services.ledgers.create({ tenantId: row.tenant_id, name: `${code} product ledger` });
+        await services.assets.create({ tenantId: provisioned.tenantId, code, scale: 2 });
+        const ledger = await services.ledgers.create({ tenantId: provisioned.tenantId, name: `${code} product ledger` });
         const accounts: Record<string, string> = {};
         for (const [role, side, policy, grant] of [
           ['funding', AccountSide.DEBIT, OverdraftPolicy.ALLOW, false],
@@ -80,19 +87,27 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
           ['credits', AccountSide.CREDIT, OverdraftPolicy.DISALLOW, true],
           ['usage', AccountSide.CREDIT, OverdraftPolicy.DISALLOW, false],
         ] as const) {
-          const account = await services.accounts.create({ tenantId: row.tenant_id, ledgerId: ledger.id, code: `DEMO_${role.toUpperCase()}`, name: profile.names[role], side, overdraftPolicy: policy, grantEnabled: grant, currency: code });
+          const account = await services.accounts.create({ tenantId: provisioned.tenantId, ledgerId: ledger.id, code: `DEMO_${role.toUpperCase()}`, name: profile.names[role], side, overdraftPolicy: policy, grantEnabled: grant, currency: code });
           accounts[role] = account.id;
         }
-        await services.transactions.create({ tenantId: row.tenant_id, ledgerId: ledger.id,
+        await services.transactions.create({ tenantId: provisioned.tenantId, ledgerId: ledger.id,
           reference: `sandbox-${code}-opening`, currency: code, description: 'Opening wallet funding',
           metadata: { scenario: 'wallet', provider: { payment_id: `pay_opening_${code.toLowerCase()}` } },
           entries: [{ accountId: accounts.funding, signedAmountMinor: profile.openingMinor, currency: code },
             { accountId: accounts.primary, signedAmountMinor: -profile.openingMinor, currency: code }] });
       }
-    } catch (error) {
-      await db.sql`update api_keys set revoked_at = now() where id = ${row.api_key_id}`;
-      throw error;
-    }
+      const [created] = await tx.insert(demoSessions).values({
+        tokenHash: hash(secret),
+        tenantId: provisioned.tenantId,
+        apiKeyId: provisioned.key.id,
+        expiresAt: expires,
+      }).returning();
+      return {
+        tenant_id: created.tenantId,
+        api_key_id: created.apiKeyId,
+        expires_at: created.expiresAt,
+      };
+    });
     // Replacing a sandbox revokes its previous credential, never truncates shared tables.
     const previous = cookieValue(request);
     if (previous) await db.sql`update api_keys set revoked_at = now() where id in

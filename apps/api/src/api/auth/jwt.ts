@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { ApiKeyRole, type AuthContext, UnauthorizedError } from '@borecount/core/application';
+import { ApiKeyRole, type AuthContext } from '@borecount/core/application';
+import { UnauthorizedError } from '@borecount/core/errors';
 
 const JWT_HEADER = {
   alg: 'HS256',

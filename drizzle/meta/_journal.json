@@ -5,64 +5,29 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1791024201284,
-      "tag": "0000_initial-schema",
+      "when": 1794231076205,
+      "tag": "0000_2026-11-09-baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1791205624306,
-      "tag": "0001_grant_account_capability",
+      "when": 1794312761037,
+      "tag": "0001_2026-11-10-reconciliation-run-rules-and-history-indexes",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1791314756970,
-      "tag": "0002_2026-10-06-signed-entry-amounts",
+      "when": 1794316796660,
+      "tag": "0002_2026-11-10-reconciliation-filtered-history-indexes",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
-      "when": 1791386369702,
-      "tag": "0003_transaction_metadata",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1791461019830,
-      "tag": "0004_grant_hold_allocations",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1792244860841,
-      "tag": "0005_2026-10-17-add-credit-grant-list-index",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1792255494638,
-      "tag": "0006_2026-10-17-partial-credit-grant-refund",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1792255503419,
-      "tag": "0007_2026-10-17-partial-credit-grant-refund-functions",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1792953243048,
-      "tag": "0008_demo_sessions",
+      "when": 1794316796661,
+      "tag": "0003_demo_sessions",
       "breakpoints": true
     }
   ]

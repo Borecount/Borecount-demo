@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { generateApiKey } from '@borecount/core/application';
+import { createHash } from 'node:crypto';
+import postgres from 'postgres';
 import { testSandbox } from './sandbox-api.test.mjs';
 
 const databaseUrl = process.env.DATABASE_URL_TEST ??
@@ -37,6 +40,25 @@ const waitForApi = async () => {
 };
 
 await run('node', ['scripts/prepare-test-db.mjs'], testEnvironment);
+const bootstrapKey = generateApiKey();
+const bootstrapEnvironment = {
+  ...testEnvironment,
+  BOOTSTRAP_TENANT_NAME: 'Integration admin',
+  BOOTSTRAP_ADMIN_API_KEY: bootstrapKey,
+};
+await run('npm', ['run', 'bootstrap:admin-key'], bootstrapEnvironment);
+await run('npm', ['run', 'bootstrap:admin-key'], bootstrapEnvironment);
+const bootstrapSql = postgres(databaseUrl, { max: 1 });
+try {
+  const keys = await bootstrapSql`select k.role, k.key_hash, t.name from api_keys k join tenants t on t.id = k.tenant_id`;
+  assert.equal(keys.length, 1, 'Repeated bootstrap must keep a single admin credential');
+  assert.equal(keys[0].role, 'ADMIN');
+  assert.equal(keys[0].name, 'Integration admin');
+  assert.equal(keys[0].key_hash, createHash('sha256').update(bootstrapKey).digest('hex'));
+} finally {
+  await bootstrapSql.end({ timeout: 5 });
+}
+
 const api = spawn('npm', ['run', 'start'], { env: testEnvironment, stdio: 'inherit' });
 
 try {

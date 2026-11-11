@@ -3,6 +3,8 @@ import { parseRateLimitConfig } from '@api/rate-limit/policy';
 import { createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
 import { isMainModule } from './utils/is-main-module';
+import { ApiKeyRole } from '@borecount/core/application';
+import { ForbiddenError } from '@borecount/core/errors';
 import { createApplicationServices, createDbClient } from '@borecount/postgres-adapter';
 
 const parsePort = (value: string | undefined): number => {
@@ -47,6 +49,14 @@ export const run = async (): Promise<void> => {
     services,
     jwtAuth,
     rateLimit: parseRateLimitConfig(process.env),
+    authorizeAdjustment: async ({ tenantId, apiKeyId, apiKeyRole }) => {
+      if (apiKeyRole !== ApiKeyRole.ADMIN) {
+        const [sandbox] = await dbClient.sql`select id from demo_sessions
+          where tenant_id = ${tenantId} and api_key_id = ${apiKeyId} and expires_at > now()`;
+        if (!sandbox) throw new ForbiddenError('Adjustments require an ADMIN key or an active sandbox session');
+      }
+      return { actorId: apiKeyId };
+    },
   });
   registerSandbox(server, dbClient, services, jwtAuth);
   const port = parsePort(process.env.PORT);
