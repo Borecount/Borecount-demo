@@ -21,6 +21,33 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   const first = (await call('POST', '/demo/session', undefined, 201)).body;
   assert.ok(first.access_token); token = first.access_token;
   const firstCookie = cookie, firstToken = token;
+  // A late session-table failure must roll back provisioning and all opening data.
+  const provisioningSql = postgres(databaseUrl, { max: 1 });
+  try {
+    const counts = () => provisioningSql`select
+      (select count(*) from tenants) as tenants,
+      (select count(*) from api_keys) as keys,
+      (select count(*) from assets) as assets,
+      (select count(*) from ledgers) as ledgers,
+      (select count(*) from accounts) as accounts,
+      (select count(*) from transactions) as transactions,
+      (select count(*) from demo_sessions) as sessions`;
+    const before = await counts();
+    await provisioningSql.unsafe(`create function reject_test_session() returns trigger language plpgsql as $$
+      begin raise exception 'Injected session insert failure'; end;
+    $$`);
+    await provisioningSql.unsafe('create trigger reject_test_session before insert on demo_sessions for each row execute function reject_test_session()');
+    await call('POST', '/demo/session', undefined, 500);
+    assert.deepEqual(await counts(), before, 'Failed sandbox must leave no partial tenant or opening data');
+    assert.equal(cookie, firstCookie);
+    assert.equal((await call('GET', '/demo/session', undefined, 200)).body.tenant_id, first.tenant_id);
+    await call('GET', '/v1/ledgers', undefined, 200);
+  } finally {
+    await provisioningSql.unsafe('drop trigger if exists reject_test_session on demo_sessions');
+    await provisioningSql.unsafe('drop function if exists reject_test_session()');
+    await provisioningSql.end({ timeout: 5 });
+  }
+
   const ledgers = (await call('GET', '/v1/ledgers?limit=1', undefined, 200)).body;
   assert.equal(ledgers.data.length, 1); assert.ok(ledgers.next_cursor);
   const secondPage = (await call('GET', '/v1/ledgers?limit=1&cursor=' + encodeURIComponent(ledgers.next_cursor), undefined, 200)).body;

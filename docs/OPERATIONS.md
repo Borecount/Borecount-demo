@@ -25,7 +25,7 @@ The demo reads process environment directly. Node forbids `--env-file` in `NODE_
 | `RATE_LIMIT_WRITE_WINDOW_SECONDS` | `60` | Positive integer fixed-window size. |
 | `BOOTSTRAP_TENANT_NAME` | **Optional bootstrap utility only** | Initial tenant display name for manually creating an initial ADMIN key. |
 | `BOOTSTRAP_ADMIN_KEY_NAME` | `Initial admin key` | Initial key display name when using the optional bootstrap utility. |
-| `BOOTSTRAP_ADMIN_API_KEY` | **Optional bootstrap utility only** | Raw initial admin key. Secret; not needed to run the demo or create private sandbox sessions. |
+| `BOOTSTRAP_ADMIN_API_KEY` | **Optional bootstrap utility only** | Generated initial admin key (`llk_` followed by 64 lowercase hex digits). Secret; not needed to run the demo or create private sandbox sessions. |
 
 Unknown variables are ignored. Configuration is validated at process startup; invalid values fail fast.
 
