@@ -19,6 +19,7 @@ function type(schema = {}) {
   return schema.nullable && !result.includes(' | null') ? `${result} | null` : result;
 }
 let output = '// Generated from openapi/openapi.yaml. Run npm run generate:api; do not edit.\n';
+output += `export const apiVersion = ${literal(spec.info.version)};\n`;
 output += 'export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };\n';
 for (const [name, schema] of Object.entries(spec.components.schemas)) output += `export type ${name} = ${type(schema)};\n`;
 const target = new URL('../apps/web/src/generated-contract.ts', import.meta.url);
