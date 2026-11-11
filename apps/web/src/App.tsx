@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { allPages, money, observeRequests, query, request, requestToCurl, setAccessToken, toMinor,
-  type Account, type Balance, type DemoRequest, type Entry, type Hold, type Json, type Ledger, type Page, type RequestRecord, type Session, type Transaction } from './api';
+import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
+import { allPages, libraryCode, toLibraryCall, toRestRequest, money, observeRequests, query, request, requestToCurl, setAccessToken, setDemoMode, toMinor,
+  type DemoMode, type LibraryCall, type Account, type Balance, type DemoRequest, type Entry, type Hold, type Json, type Ledger, type Page, type RequestRecord, type Session, type Transaction } from './api';
 import { operations, scenarios, type Area, type Context, type Operation } from './operations';
 import { apiVersion } from './generated-contract';
 import { entriesAreBalanced, toEntryDisplay } from './ledger-display';
 
+const ModeContext = createContext<DemoMode>('rest');
 const areas: Area[] = ['Accounts', 'Transactions', 'Holds', 'Credits', 'Reconciliation', 'Reports'];
 const pretty = (v: unknown) => JSON.stringify(v, null, 2);
 const ref = () => `demo-${crypto.randomUUID().slice(0, 8)}`;
@@ -16,9 +17,16 @@ async function copyText(value: string) {
   const input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0';
   document.body.append(input); input.select();
   const copied = document.execCommand('copy'); input.remove();
-  if (!copied) throw new Error('Clipboard unavailable. Select and copy the cURL text.');
+  if (!copied) throw new Error('Clipboard unavailable. Select and copy the example.');
 }
 function JsonBlock({ value }: { value: unknown }) { return <pre>{pretty(value)}</pre>; }
+function LibraryPreview({ call, tenantId, actorId }: { call: () => LibraryCall; tenantId?: string; actorId?: string }) {
+  try {
+    return <pre data-testid="library-preview">{libraryCode(call(), tenantId, actorId)}</pre>;
+  } catch {
+    return <p className="muted">Enter valid arguments to preview the TypeScript example.</p>;
+  }
+}
 function DataTable({ rows }: { rows: Record<string, Json>[] }) {
   if (!rows.length) return <p className="muted">No records in this page.</p>;
   const columns = Object.keys(rows[0]);
@@ -26,11 +34,15 @@ function DataTable({ rows }: { rows: Record<string, Json>[] }) {
 }
 
 function ReadPanel({ title, path, busy, execute }: { title: string; path: string; busy: boolean; execute: (op: DemoRequest, signal?: AbortSignal) => Promise<Json | undefined> }) {
+  const mode = useContext(ModeContext);
+  const initialCall = () => { try { return toLibraryCall({ method: 'GET', path }); } catch { return null; } };
+  const [libraryInput, setLibraryInput] = useState(() => pretty(initialCall()?.input ?? {}));
   const [url, setUrl] = useState(path), [result, setResult] = useState<Json>(null), [where, setWhere] = useState('{}');
   const [continuation, setContinuation] = useState<string | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     setUrl(path); setResult(null); setContinuation(null); setWhere('{}');
+    setLibraryInput(pretty(initialCall()?.input ?? {}));
     return () => activeRequest.current?.abort();
   }, [path]);
   const load = async (next = false) => {
@@ -45,7 +57,14 @@ function ReadPanel({ title, path, busy, execute }: { title: string; path: string
         else target.searchParams.delete('where');
         target.searchParams.delete('cursor');
       }
-      const value = await execute({ method: 'GET', path: target.pathname + target.search }, controller.signal);
+      let operation: DemoRequest = { method: 'GET', path: target.pathname + target.search };
+      if (mode === 'library') {
+        const call = toLibraryCall({ method: 'GET', path });
+        call.input = JSON.parse(libraryInput);
+        if (next && continuation) call.input.cursor = new URL(continuation, window.location.origin).searchParams.get('cursor');
+        operation = { ...toRestRequest(call), libraryCall: call };
+      }
+      const value = await execute(operation, controller.signal);
       if (controller.signal.aborted || value === undefined) return;
       setResult(value);
       const body = asObject(value);
@@ -54,11 +73,15 @@ function ReadPanel({ title, path, busy, execute }: { title: string; path: string
     } catch (e) { if (!controller.signal.aborted) setResult({ error: describe(e) }); }
   };
   const object = asObject(result);
-  return <section className="panel read-panel" aria-label={title}><div className="panel-title"><h2>{title}</h2><span>Canonical API</span></div>
-    <label>Request URL<input value={url} onChange={e => { setUrl(e.target.value); setContinuation(null); }} /></label>
+  return <section className="panel read-panel" aria-label={title}><div className="panel-title"><h2>{title}</h2><span>{mode === 'library' ? 'Library call' : 'Canonical API'}</span></div>
+    {mode === 'rest' ? <><label>Request URL<input value={url} onChange={e => { setUrl(e.target.value); setContinuation(null); }} /></label>
     <details className="filter-details"><summary>Server filters · where JSON</summary><p className="muted">Use only fields allowed by this endpoint. Filters are ANDed. Metadata paths are excluded. See API docs for field schemas.</p>
       <textarea aria-label={`${title} filters`} value={where} onChange={e => { setWhere(e.target.value); setContinuation(null); }} rows={4} spellCheck={false} />
-    </details>
+    </details></> : <>
+      <p><code>services.{initialCall()?.operation ?? 'Select a resource'}</code></p>
+      <label>Library arguments<textarea aria-label={`${title} library arguments`} value={libraryInput} onChange={e => { setLibraryInput(e.target.value); setContinuation(null); }} rows={6} spellCheck={false} /></label>
+      <p className="muted">Arguments use camelCase. Amounts and dates are strings in this editor and become bigint and Date values on the server.</p>
+    </>}
     <div className="actions"><button className="primary" disabled={busy} onClick={() => void load()}>Load {title.toLowerCase()}</button>
       {continuation && <button className="secondary" disabled={busy} onClick={() => void load(true)}>Next page</button>}</div>
     {result !== null && <><div className="result-summary">{Array.isArray(object.data) ? `${object.data.length} records · ${continuation ? 'more pages available' : 'last page'}` : 'Response'}</div>
@@ -114,6 +137,8 @@ function ReconciliationHistory({ title, path, idField, selectedId, onSelect, bus
 }
 
 export function App() {
+  const [mode, setMode] = useState<DemoMode>('rest');
+  const [libraryDraft, setLibraryDraft] = useState('{}');
   const [session, setSession] = useState<Session | null>(null), [area, setArea] = useState<Area>('Accounts');
   const [ledgers, setLedgers] = useState<Ledger[]>([]), [ledger, setLedger] = useState(''), [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]), [txCursor, setTxCursor] = useState<string | null>(null), [txFilter, setTxFilter] = useState('');
@@ -184,7 +209,7 @@ export function App() {
     setFrom(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_PRIMARY')?.name ?? '');
     setTo(old => a.some(x => x.name === old) ? old : a.find(x => x.code === 'DEMO_SECONDARY')?.name ?? '');
     return a;
-  }, [ledger, txFilter, holdWhere]);
+  }, [ledger, txFilter, holdWhere, mode]);
   refreshRef.current = refresh;
   useEffect(() => { setAccounts([]); setTransactions([]); setHolds([]); setSelectedAccount(''); setBalance(null); setIds(initialIds); setExpirationAsOf(''); setSelectedTx(null); setTxEntries([]); setPreset(null); setBeforeAfter(null); setLastSent(null); setReference(ref()); }, [ledger]);
   useEffect(() => { void refresh().catch(e => setError(describe(e))); }, [refresh]);
@@ -201,6 +226,9 @@ export function App() {
     const version = ++executionVersion.current;
     setBusy(true); setError(null); setCopied(false);
     try {
+      if (mode === 'rest' && operation.path.startsWith('/v1/adjustments/') && operation.body?.actor_id === undefined) {
+        operation = { ...operation, body: { ...operation.body, actor_id: session?.actor_id ?? '' } };
+      }
       const result = await request<Json>(operation, signal, true);
       if (signal?.aborted) return undefined;
       const body = asObject(result);
@@ -233,11 +261,34 @@ export function App() {
   };
   const choose = (op: Operation) => {
     const draft = op.build(context, ref()); setPreset(op); setDraftPath(draft.path); setDraftMethod(draft.method); setDraftBody(pretty(draft.body ?? {}));
+    setLibraryDraft(pretty(toLibraryCall(draft).input));
+  };
+  const switchMode = (next: DemoMode) => {
+    if (next === mode || busy) return;
+    refreshVersion.current++; inspectionVersion.current++;
+    balanceController.current?.abort();
+    setDemoMode(next); setMode(next); setError(null); setCopied(false);
+    if (preset) {
+      try {
+        if (next === 'library') setLibraryDraft(pretty(toLibraryCall({ method: draftMethod, path: draftPath, ...(draftMethod === 'POST' ? { body: JSON.parse(draftBody) } : {}) }).input));
+        else {
+          const operation = toRestRequest({ operation: toLibraryCall({ method: draftMethod, path: draftPath }).operation, input: JSON.parse(libraryDraft) });
+          if (operation.path.startsWith('/v1/adjustments/')) operation.body = { ...operation.body, actor_id: session?.actor_id ?? '' };
+          setDraftMethod(operation.method); setDraftPath(operation.path); setDraftBody(pretty(operation.body ?? {}));
+        }
+      } catch { setPreset(null); }
+    }
   };
   const switchArea = (next: Area) => { setArea(next); setPreset(null); setCopied(false); };
   const openOperation = (id: string) => { const op = operations.find(o => o.id === id)!; setArea(op.area); choose(op); };
   const submitDraft = async () => {
     try {
+      if (mode === 'library') {
+        const call = toLibraryCall({ method: draftMethod, path: draftPath });
+        call.input = JSON.parse(libraryDraft);
+        await execute({ ...toRestRequest(call), libraryCall: call });
+        return;
+      }
       const body = draftMethod === 'POST' && draftBody.trim() ? JSON.parse(draftBody) : undefined;
       if (body !== undefined && (body === null || Array.isArray(body) || typeof body !== 'object')) throw new Error('Request body must be a JSON object');
       await execute({ method: draftMethod, path: draftPath, ...(body ? { body } : {}) });
@@ -246,7 +297,7 @@ export function App() {
   const inspectTransaction = async (tx: Transaction) => {
     const version = ++inspectionVersion.current;
     setSelectedTx(tx); setIds(old => ({ ...old, tx: tx.id })); setTxEntries([]);
-    try { const data = await allPages<Entry>(query('/v1/entries', { limit: 200, where: pretty({ transaction_id: { eq: tx.id } }) })); if (inspectionVersion.current === version) setTxEntries(data); } catch (e) { setError(describe(e)); }
+    try { const data = await allPages<Entry>(query('/v1/entries', { limit: 200, where: pretty({ transaction_id: { eq: tx.id } }) })); if (inspectionVersion.current === version) setTxEntries(data); } catch (e) { if (inspectionVersion.current === version) setError(describe(e)); }
   };
   const sendTransfer = async (hold = false) => {
     try {
@@ -274,7 +325,7 @@ export function App() {
   const baseCreditAccount = accounts.find(a => a.code === 'DEMO_CREDITS' || a.name === 'credits:alice')?.id ?? selectedAccount;
   const reportQuery = { from: reportFrom, as_of: reportAsOf, limit: 25 };
 
-  return <main>
+  return <ModeContext.Provider value={mode}><main>
     <header><a className="brand" href="/"><span className="mark">B</span>Borecount</a><nav>
       <a href="https://github.com/Borecount/Borecount" target="_blank" rel="noreferrer">GitHub ↗</a><a href="/docs?demo=1" target="_blank" rel="noreferrer">API docs ↗</a>
     </nav></header>
@@ -283,10 +334,17 @@ export function App() {
       <p className="hero-note">Built for Node.js teams · PostgreSQL-backed · Framework-agnostic core</p>
     </section>
     <div className="proof-strip hero-proof"><div><strong>Atomic</strong><span>postings, holds and bulk rollback</span></div><div><strong>Idempotent</strong><span>safe retries by reference</span></div><div><strong>Auditable</strong><span>reversals, history and statements</span></div><div><strong>Reconciled</strong><span>provider matching and reports</span></div></div>
+    <section className="integration-mode" aria-label="Integration mode">
+      <div><strong>Integration mode</strong><p>{mode === 'rest' ? 'Explore every workflow through the REST API.' : 'Calls the library directly on the demo server. Shares your current sandbox.'}</p></div>
+      <div className="mode-switch" role="group" aria-label="Integration mode">
+        <button aria-pressed={mode === 'rest'} disabled={busy} onClick={() => switchMode('rest')}>REST API</button>
+        <button aria-pressed={mode === 'library'} disabled={busy} onClick={() => switchMode('library')}>Library</button>
+      </div>
+    </section>
     <section className="flow-guide" id="flows" aria-label="Guided demo flows">
-      <div className="flow-guide-heading"><div className="section-intro compact"><p className="eyebrow">GUIDED DEMO</p><h2>Explore real ledger flows.</h2><p>Choose a workflow to open its first API request. Follow the steps, edit the payloads and inspect each result.</p></div><a href="#workspace">Open workspace <span aria-hidden="true">↗</span></a></div>
-      <div className="scenario-grid">{scenarios.map((s, i) => <button className="scenario-card" disabled={!session || busy} key={s.name} onClick={() => { setScenario(i); setStep(0); openOperation(s.steps[0]); document.getElementById('workspace')?.scrollIntoView({ behavior: 'smooth' }); }}><span className="scenario-number">0{i + 1} <span>↗</span></span><h3>{s.name}</h3><p>{s.summary}</p><small>{s.steps.length} steps · editable requests</small></button>)}</div>
-      <p className="flow-primer"><strong>Reading the ledger</strong><span>From the platform's perspective, customer wallets are CREDIT-normal liabilities. Positive entries are debits; negative entries are credits. Debiting a wallet lowers its displayed balance. Amounts use integer strings in minor units.</span></p>
+      <div className="flow-guide-heading"><div className="section-intro compact"><p className="eyebrow">GUIDED DEMO</p><h2>Explore real ledger flows.</h2><p>Choose a workflow, edit its inputs and inspect each result in your selected integration mode.</p></div><a href="#workspace">Open workspace <span aria-hidden="true">↗</span></a></div>
+      <div className="scenario-grid">{scenarios.map((s, i) => <button className="scenario-card" disabled={!session || busy} key={s.name} onClick={() => { setScenario(i); setStep(0); openOperation(s.steps[0]); document.getElementById('workspace')?.scrollIntoView({ behavior: 'smooth' }); }}><span className="scenario-number">0{i + 1} <span>↗</span></span><h3>{s.name}</h3><p>{s.summary}</p><small>{s.steps.length} steps · editable inputs</small></button>)}</div>
+      <p className="flow-primer"><strong>Reading the ledger</strong><span>From the platform's perspective, customer wallets are CREDIT-normal liabilities. Positive entries are debits; negative entries are credits. Debiting a wallet lowers its displayed balance. {mode === 'rest' ? 'Amounts use integer strings in minor units.' : 'Library amounts use bigint minor units.'}</span></p>
     </section>
     <section className="workspace-shell" id="workspace" aria-label="Live demo workspace">
     {error && <div className="error" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError(null)}>×</button></div>}
@@ -303,7 +361,7 @@ export function App() {
     {area === 'Accounts' && <>
       <section className="panel"><div className="panel-title"><h2>Chart of accounts</h2><span>{accounts.length} accounts · all cursor pages loaded</span></div><div className="account-grid">{accounts.map(a => <button className={`account-card ${selectedAccount === a.id ? 'selected' : ''}`} key={a.id} data-testid={`account-${a.name}`} onClick={() => setSelectedAccount(a.id)}><div><span className="badge">{a.side}</span>{a.grant_enabled && <span className="badge credit">GRANT</span>}</div><h3>{a.name}</h3><b>{money((a.side === 'CREDIT' ? -BigInt(a.balance_minor) : BigInt(a.balance_minor)).toString(), a.currency, scale)}</b><small>{a.overdraft_policy} overdraft</small><code>{a.id}</code></button>)}</div></section>
       {balance && <section className="balance-strip"><div><span>Selected</span><strong>{availableAccount?.name}</strong></div><div><span>Posted · canonical sign</span><strong>{money(balance.posted_minor, currency, scale)}</strong></div><div><span>Reserved delta</span><strong>{money(balance.reserved_delta_minor, currency, scale)}</strong></div><div><span>Available</span><strong data-testid="available-balance">{money(balance.available_minor, currency, scale)}</strong></div></section>}
-      <ReadPanel title="Account directory" path={query('/v1/accounts', { ledger_id: ledger, limit: 25 })} execute={execute} busy={busy} />
+      <ReadPanel key={`${mode}:Account directory`} title="Account directory" path={query('/v1/accounts', { ledger_id: ledger, limit: 25 })} execute={execute} busy={busy} />
     </>}
 
     {area === 'Transactions' && <>
@@ -313,7 +371,7 @@ export function App() {
         <label>Amount<input aria-label="Transfer amount" value={amount} inputMode="decimal" onChange={e => setAmount(e.target.value)} /></label>
         <label>Reference<input aria-label="Transfer reference" value={reference} onChange={e => setReference(e.target.value)} /></label>
         <div className="actions"><button className="primary" disabled={busy || !session}>Send transfer</button><button type="button" className="secondary" disabled={busy || !session} onClick={() => void sendTransfer(true)}>Reserve transfer</button><button type="button" className="text-button" onClick={() => setReference(ref())}>New reference</button></div></form>
-        <div className="panel"><p className="eyebrow">RETRIES YOU CAN SEE</p><h2>One reference. One posting.</h2><p>Send a transfer twice with the same reference and payload. The first returns 201; the repeat returns 200 and created: false.</p><p>Change the amount while keeping the reference to inspect a payload mismatch. The original posting remains unchanged.</p><p className="muted">Reversal and correction work on the transaction selected below.</p></div></section>
+        <div className="panel"><p className="eyebrow">RETRIES YOU CAN SEE</p><h2>One reference. One posting.</h2><p>Send a transfer twice with the same reference and payload. {mode === 'rest' ? 'The first returns 201; the repeat returns 200 and created: false.' : 'The first returns created: true; the repeat returns the same transactionId and created: false.'}</p><p>Change the amount while keeping the reference to inspect a payload mismatch. The original posting remains unchanged.</p><p className="muted">Reversal and correction work on the transaction selected below.</p></div></section>
       <section className="panel ledger"><div className="panel-title"><h2>Transactions</h2><span>10 per page · select to inspect</span></div><label>Exact reference filter<input placeholder="All references" value={txFilter} onChange={e => setTxFilter(e.target.value)} /></label>
         {transactions.map(t => <button className={`transaction-row ${ids.tx === t.id ? 'selected' : ''}`} key={t.id} onClick={() => void inspectTransaction(t)}><div><strong>{t.description ?? t.reference}</strong><code>{t.reference}</code></div><span>{t.relation_type ?? 'POSTING'}</span><time>{new Date(t.effective_at).toLocaleString()}</time><span>↗</span></button>)}
         {!transactions.length && <p className="muted">No matching transactions.</p>}{txCursor && <button className="secondary" disabled={busy} onClick={() => void moreTransactions()}>Load more transactions</button>}
@@ -338,57 +396,91 @@ export function App() {
       <section className="panel"><p className="eyebrow">PREPAID CAPACITY</p><h2>From issuance to consumption.</h2><p>Issue multiple grants, spend from the promotional account, then inspect which lots funded each entry. Holds reserve capacity; refunds and expiration operate on the remaining eligible capacity.</p>
         <label>Selected grant ID<input aria-label="Selected grant ID" value={ids.grant} placeholder="Issue a grant or paste an ID from the directory" onChange={e => setIds(old => ({ ...old, grant: e.target.value }))} /></label>
         <p className="muted">A full reversal requires an untouched grant. Refunds cannot return consumed, expired or actively reserved capacity.</p></section>
-      <div className="read-grid"><ReadPanel title="Credit balance" path={`/v1/accounts/${baseCreditAccount}/credit-balance`} execute={execute} busy={busy} /><ReadPanel title="Credit lots" path={`/v1/accounts/${baseCreditAccount}/credit-lots?limit=25`} execute={execute} busy={busy} /></div>
-      <ReadPanel title="Grant directory" path={query('/v1/credit-grants', { account_id: baseCreditAccount, limit: 25 })} execute={execute} busy={busy} />
+      <div className="read-grid"><ReadPanel key={`${mode}:Credit balance`} title="Credit balance" path={`/v1/accounts/${baseCreditAccount}/credit-balance`} execute={execute} busy={busy} /><ReadPanel key={`${mode}:Credit lots`} title="Credit lots" path={`/v1/accounts/${baseCreditAccount}/credit-lots?limit=25`} execute={execute} busy={busy} /></div>
+      <ReadPanel key={`${mode}:Grant directory`} title="Grant directory" path={query('/v1/credit-grants', { account_id: baseCreditAccount, limit: 25 })} execute={execute} busy={busy} />
     </>}
 
     {area === 'Reconciliation' && session && ledger && <>
       <section className="panel"><p className="eyebrow">PROVIDER STATEMENT ↔ LEDGER</p><h2>Make differences explainable.</h2><p>Create rules, upload normalized records, preview matching and persist a report. Review matched, mismatched, unmatched external/internal and conflict results.</p>
-        <div className="field-grid">{(['upload', 'rule', 'run'] as const).map(key => <label key={key}>{key} ID<input aria-label={`${key} ID`} value={ids[key]} placeholder="Filled by the corresponding API response" onChange={e => selectReconciliationId(key, e.target.value)} /></label>)}</div>
-        <p className="muted">Selecting an ID closes the current request draft. Choose an operation to use the selected IDs. Matching strategy: one_to_one. Use amount_tolerance_minor and date_tolerance_seconds inside rule criteria. CSV import is converted locally to the documented JSON request.</p></section>
-      <ReadPanel title="Matching rules" path="/v1/reconciliation/matching-rules?limit=25" execute={execute} busy={busy} />
-      <ReconciliationHistory key={`uploads:${session?.tenant_id ?? ''}:${reconciliationHistoryRevision}`} title="Saved uploads" path="/v1/reconciliation/uploads?limit=25" idField="upload_id" selectedId={ids.upload} onSelect={upload => selectReconciliationId('upload', upload)} busy={busy} />
-      <ReconciliationHistory key={`runs:${session?.tenant_id ?? ''}:${ledger}:${reconciliationHistoryRevision}`} title="Saved runs" path={query('/v1/reconciliation/runs', { where: JSON.stringify({ ledger_id: { eq: ledger } }), limit: 25 })} idField="id" selectedId={ids.run} onSelect={run => selectReconciliationId('run', run)} busy={busy} />
+        <div className="field-grid">{(['upload', 'rule', 'run'] as const).map(key => <label key={key}>{key} ID<input aria-label={`${key} ID`} value={ids[key]} placeholder="Filled by the corresponding result" onChange={e => selectReconciliationId(key, e.target.value)} /></label>)}</div>
+        <p className="muted">Selecting an ID closes the current request draft. Choose an operation to use the selected IDs. Matching strategy: one_to_one. Use amount_tolerance_minor and date_tolerance_seconds inside rule criteria. {mode === 'rest' ? 'CSV import is converted locally to the documented JSON request.' : 'CSV import becomes arguments for services.reconciliation.ingest.'}</p></section>
+      <ReadPanel key={`${mode}:Matching rules`} title="Matching rules" path="/v1/reconciliation/matching-rules?limit=25" execute={execute} busy={busy} />
+      <ReconciliationHistory key={`${mode}:uploads:${session?.tenant_id ?? ''}:${reconciliationHistoryRevision}`} title="Saved uploads" path="/v1/reconciliation/uploads?limit=25" idField="upload_id" selectedId={ids.upload} onSelect={upload => selectReconciliationId('upload', upload)} busy={busy} />
+      <ReconciliationHistory key={`${mode}:runs:${session?.tenant_id ?? ''}:${ledger}:${reconciliationHistoryRevision}`} title="Saved runs" path={query('/v1/reconciliation/runs', { where: JSON.stringify({ ledger_id: { eq: ledger } }), limit: 25 })} idField="id" selectedId={ids.run} onSelect={run => selectReconciliationId('run', run)} busy={busy} />
       {ids.run && <>
-        <ReadPanel key={`report:${session.tenant_id}:${ids.run}`} title="Run report" path={`/v1/reconciliation/runs/${ids.run}`} execute={execute} busy={busy} />
-        <ReadPanel key={`results:${session.tenant_id}:${ids.run}`} title="Reconciliation results" path={`/v1/reconciliation/runs/${ids.run}/results?limit=25`} execute={execute} busy={busy} />
+        <ReadPanel key={`${mode}:report:${session.tenant_id}:${ids.run}`} title="Run report" path={`/v1/reconciliation/runs/${ids.run}`} execute={execute} busy={busy} />
+        <ReadPanel key={`${mode}:results:${session.tenant_id}:${ids.run}`} title="Reconciliation results" path={`/v1/reconciliation/runs/${ids.run}/results?limit=25`} execute={execute} busy={busy} />
       </>}
     </>}
 
     {area === 'Reports' && <>
       <section className="panel"><div className="panel-title"><h2>Reporting boundaries</h2><span>Explicit, stable time windows</span></div><div className="field-grid"><label>Account<select aria-label="Report account" value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)}>{accounts.map(a => <option value={a.id} key={a.id}>{a.name}</option>)}</select></label><label>From · ISO timestamp<input value={reportFrom} onChange={e => setReportFrom(e.target.value)} /></label><label>As of · ISO timestamp<input value={reportAsOf} onChange={e => setReportAsOf(e.target.value)} /></label></div>
         <button className="text-button" onClick={() => setReportAsOf(new Date().toISOString())}>Set as of to now</button><p className="muted">Opening includes events at from; movements cover (from, as_of]. Reconcile opening + deltas = closing across all pages. Credit capacity uses creation time; account history uses effective time.</p></section>
-      <ReadPanel title="Historical balance" path={query(`/v1/accounts/${selectedAccount}/balance-as-of`, { at: reportAsOf })} execute={execute} busy={busy} />
-      <ReadPanel title="Balance history" path={query(`/v1/accounts/${selectedAccount}/balance-history`, { from: reportFrom, to: reportAsOf, limit: 25 })} execute={execute} busy={busy} />
-      <ReadPanel title="Account statement" path={query(`/v1/accounts/${selectedAccount}/statement`, reportQuery)} execute={execute} busy={busy} />
-      <ReadPanel title="Credit statement" path={query(`/v1/accounts/${baseCreditAccount}/credit-statement`, { ...reportQuery, ...(ids.grant ? { grant_id: ids.grant } : {}) })} execute={execute} busy={busy} />
-      <ReadPanel title="Trial balance" path={`/v1/ledgers/${ledger}/trial-balance`} execute={execute} busy={busy} />
+      <ReadPanel key={`${mode}:Historical balance`} title="Historical balance" path={query(`/v1/accounts/${selectedAccount}/balance-as-of`, { at: reportAsOf })} execute={execute} busy={busy} />
+      <ReadPanel key={`${mode}:Balance history`} title="Balance history" path={query(`/v1/accounts/${selectedAccount}/balance-history`, { from: reportFrom, to: reportAsOf, limit: 25 })} execute={execute} busy={busy} />
+      <ReadPanel key={`${mode}:Account statement`} title="Account statement" path={query(`/v1/accounts/${selectedAccount}/statement`, reportQuery)} execute={execute} busy={busy} />
+      <ReadPanel key={`${mode}:Credit statement`} title="Credit statement" path={query(`/v1/accounts/${baseCreditAccount}/credit-statement`, { ...reportQuery, ...(ids.grant ? { grant_id: ids.grant } : {}) })} execute={execute} busy={busy} />
+      <ReadPanel key={`${mode}:Trial balance`} title="Trial balance" path={`/v1/ledgers/${ledger}/trial-balance`} execute={execute} busy={busy} />
     </>}
 
-    {area !== 'Reports' && <section className="panel workbench"><div className="panel-title"><h2>Operation workbench</h2><span>Real payloads · editable JSON</span></div>
+    {area !== 'Reports' && <section className="panel workbench"><div className="panel-title"><h2>Operation workbench</h2><span>{mode === 'rest' ? 'Real payloads · editable JSON' : 'Direct service calls · editable arguments'}</span></div>
       <div className="operation-grid">{operations.filter(o => o.area === area).map(o => <button key={o.id} className={`operation-chip ${preset?.id === o.id ? 'selected' : ''}`} disabled={!session || busy} onClick={() => choose(o)}>{o.title}</button>)}</div>
-      {preset && <><div className="workbench-intro"><h3>{preset.title}</h3><p>{preset.help}</p></div><div className="request-editor-line"><select aria-label="Request method" value={draftMethod} onChange={e => setDraftMethod(e.target.value as 'GET' | 'POST')}><option>POST</option><option>GET</option></select><input aria-label="Request path" value={draftPath} onChange={e => setDraftPath(e.target.value)} /></div>
-        {draftMethod === 'POST' && <label>Request JSON<textarea aria-label="Request JSON" value={draftBody} onChange={e => setDraftBody(e.target.value)} rows={17} spellCheck={false} /></label>}
+      {preset && <><div className="workbench-intro"><h3>{preset.title}</h3><p>{preset.help}</p></div>
+        {mode === 'rest' ? <>
+          <div className="request-editor-line"><select aria-label="Request method" value={draftMethod} onChange={e => setDraftMethod(e.target.value as 'GET' | 'POST')}><option>POST</option><option>GET</option></select><input aria-label="Request path" value={draftPath} onChange={e => setDraftPath(e.target.value)} /></div>
+          {draftMethod === 'POST' && <label>Request JSON<textarea aria-label="Request JSON" value={draftBody} onChange={e => setDraftBody(e.target.value)} rows={17} spellCheck={false} /></label>}
+        </> : <>
+          <p className="library-method"><code>services.{toLibraryCall({ method: draftMethod, path: draftPath }).operation}</code></p>
+          <label>Library arguments<textarea aria-label="Library arguments" value={libraryDraft} onChange={e => setLibraryDraft(e.target.value)} rows={17} spellCheck={false} /></label>
+          <p className="muted">Edit structured arguments. Amounts become bigint and timestamps become Date values. The server supplies your sandbox tenant and actor.</p>
+          <LibraryPreview call={() => ({ operation: toLibraryCall({ method: draftMethod, path: draftPath }).operation, input: JSON.parse(libraryDraft) })} tenantId={session?.tenant_id} actorId={session?.actor_id} />
+        </>}
         {preset.id === 'upload' && <label>Import statement CSV<input type="file" accept=".csv,text/csv" onChange={async e => {
           const file = e.target.files?.[0]; if (!file) return;
           try {
             const { parseStatementCsv } = await import('./csv');
-            setDraftBody(pretty({ source: file.name, records: parseStatementCsv(await file.text()) }));
+            const body = { source: file.name, records: parseStatementCsv(await file.text()) };
+            if (mode === 'rest') setDraftBody(pretty(body));
+            else setLibraryDraft(pretty(toLibraryCall({ method: 'POST', path: '/v1/reconciliation/external-records', body }).input));
           } catch (cause) { setError(describe(cause)); }
           e.target.value = '';
         }} /><small>Headers: id, amount_minor, currency, reference, date, description (optional). Quoted CSV fields are supported.</small></label>}
-        <div className="actions"><button className="primary" disabled={busy || !session} onClick={() => void submitDraft()}>{busy ? 'Sending…' : 'Send request'}</button><button className="secondary" disabled={busy} onClick={() => choose(preset)}>{preset.id === 'expiration-preview' ? 'Refresh preview timestamp' : preset.id === 'expiration-run' ? 'Use latest preview timestamp' : 'Regenerate with new reference'}</button><a className="text-button" href={`/docs?demo=1&filter=${encodeURIComponent(draftPath.split('?')[0].split('/').slice(0, 3).join('/'))}`} target="_blank" rel="noreferrer">View API docs ↗</a></div>
+        <div className="actions"><button className="primary" disabled={busy || !session} onClick={() => void submitDraft()}>{busy ? 'Running…' : mode === 'rest' ? 'Send request' : 'Run library call'}</button><button className="secondary" disabled={busy} onClick={() => choose(preset)}>{preset.id === 'expiration-preview' ? 'Refresh preview timestamp' : preset.id === 'expiration-run' ? 'Use latest preview timestamp' : 'Regenerate with new reference'}</button>{mode === 'rest' && <a className="text-button" href={`/docs?demo=1&filter=${encodeURIComponent(draftPath.split('?')[0].split('/').slice(0, 3).join('/'))}`} target="_blank" rel="noreferrer">View API docs ↗</a>}</div>
       </>}
     </section>}
 
     {beforeAfter && <details className="panel ledger"><summary>Balance changes from the last successful write</summary><div className="table-scroll"><table><thead><tr><th>Account</th><th>Before</th><th>After</th><th>Delta · canonical sign</th></tr></thead><tbody>{beforeAfter.after.map(a => { const before = beforeAfter.before.find(b => b.id === a.id)?.balance_minor ?? '0'; return <tr key={a.id}><td>{a.name}</td><td>{money(before, currency, scale)}</td><td>{money(a.balance_minor, currency, scale)}</td><td>{money((BigInt(a.balance_minor) - BigInt(before)).toString(), currency, scale)}</td></tr>; })}</tbody></table></div></details>}
 
-    <section className="panel request-preview" aria-label="Request journal"><div className="panel-title"><h2>Request journal</h2><span>{records.length} / 150 latest · credentials redacted</span></div><div className="journal-layout"><div className="journal-list">{records.map(r => <button className={journal?.id === r.id ? 'selected' : ''} key={r.id} onClick={() => { setRecordId(r.id); setCopied(false); }}><span className={`http-status ${r.status >= 400 || r.status === 0 ? 'failed' : ''}`}>{r.status || 'ERR'}</span><strong>{r.request.method}</strong><code>{r.request.path}</code></button>)}</div><div className="journal-detail">{journal ? <><div className="request-line"><span>{journal.request.method}</span><code>{journal.request.path}</code><b className={journal.status >= 400 ? 'text-error' : ''}>{journal.status}</b><small>{journal.duration} ms</small></div><p className="muted">Request ID: <code>{journal.requestId ?? 'unavailable'}</code></p>
-        {journal.request.body && <><h3>Request</h3><pre data-testid="request-body">{pretty(journal.request.body)}</pre></>}
-        <h3>Response</h3><JsonBlock value={journal.response} /><div className="curl-header"><strong>Run from your terminal</strong><button className="secondary" onClick={() => { void copyText(requestToCurl(journal.request, window.location.origin)).then(() => setCopied(true)).catch(e => setError(describe(e))); }}>{copied ? 'Copied' : 'Copy curl'}</button></div><pre data-testid="curl-preview">{requestToCurl(journal.request, window.location.origin)}</pre>
-        <div className="actions">{journal.request.path.startsWith('/v1/') && <button className="secondary" disabled={busy} onClick={() => void execute(journal.request)}>Repeat exact request</button>}{lastSent && <button className="text-button" disabled={busy} onClick={() => void execute(lastSent)}>Repeat last write</button>}</div><p className="muted">cURL uses $ACCESS_TOKEN. The browser keeps the sandbox token in memory; session credentials are HttpOnly. Financial requests and responses match the public API.</p>
-      </> : <p className="muted">Requests appear here as you explore.</p>}</div></div></section>
+    <section className="panel request-preview" aria-label="Request journal"><div className="panel-title"><h2>Execution journal</h2><span>{records.length} / 150 latest · credentials redacted</span></div>
+      <div className="journal-layout"><div className="journal-list">{records.map(r => <button className={journal?.id === r.id ? 'selected' : ''} key={r.id} onClick={() => { setRecordId(r.id); setCopied(false); }}>
+        <span className={`http-status ${r.status >= 400 || r.status === 0 ? 'failed' : ''}`}>{r.mode === 'library' ? r.status >= 200 && r.status < 300 ? 'OK' : 'ERR' : r.status || 'ERR'}</span>
+        <strong>{r.mode === 'library' ? 'Library' : r.mode === 'host' ? 'Session' : r.request.method}</strong><code>{r.call?.operation ?? r.request.path}</code>
+      </button>)}</div><div className="journal-detail">{journal ? <>
+        <div className="request-line"><span>{journal.mode === 'library' ? 'Library' : journal.mode === 'host' ? 'Sandbox session' : 'REST API'}</span><code>{journal.call ? `services.${journal.call.operation}` : `${journal.request.method} ${journal.request.path}`}</code>
+          <b className={journal.status >= 400 ? 'text-error' : ''}>{journal.mode === 'library' ? journal.status >= 200 && journal.status < 300 ? 'Returned' : 'Failed' : journal.status}</b><small>{journal.duration} ms</small></div>
+        <p className="muted">{journal.mode === 'library' ? 'Execution ID' : 'Request ID'}: <code>{journal.requestId ?? 'unavailable'}</code></p>
+        {(journal.call || journal.request.body) && <><h3>{journal.call ? 'Arguments' : 'Request'}</h3><pre data-testid="request-body">{pretty(journal.call?.input ?? journal.request.body)}</pre></>}
+        <h3>{journal.mode === 'library' ? journal.status >= 400 ? 'Library error' : 'Returned value' : 'Response'}</h3><JsonBlock value={journal.response} />
+        <div className="curl-header"><strong>{journal.call ? 'Use in your Node.js application' : 'Run from your terminal'}</strong><button className="secondary" onClick={() => {
+          try {
+            const example = journal.call ? libraryCode(journal.call, journal.call.input.tenantId ?? session?.tenant_id, journal.call.input.actorId ?? session?.actor_id) : requestToCurl(journal.request, window.location.origin);
+            void copyText(example).then(() => setCopied(true)).catch(e => setError(describe(e)));
+          } catch (e) { setError(describe(e)); }
+        }}>{copied ? 'Copied' : journal.call ? 'Copy TypeScript' : 'Copy curl'}</button></div>
+        {journal.call ? <LibraryPreview call={() => journal.call!} tenantId={journal.call.input.tenantId ?? session?.tenant_id} actorId={journal.call.input.actorId ?? session?.actor_id} /> : <pre data-testid="curl-preview">{requestToCurl(journal.request, window.location.origin)}</pre>}
+        <div className="actions">{journal.request.path.startsWith('/v1/') && <button className="secondary" disabled={busy} onClick={() => {
+          const operation = { ...journal.request };
+          if (mode === 'rest') delete operation.libraryCall;
+          void execute(operation);
+        }}>{mode === 'rest' ? 'Repeat exact request' : 'Repeat in Library'}</button>}{lastSent && <button className="text-button" disabled={busy} onClick={() => {
+          const operation = { ...lastSent };
+          if (mode === 'rest') delete operation.libraryCall;
+          void execute(operation);
+        }}>Repeat last write</button>}</div>
+        <p className="muted">{journal.call ? 'This call ran directly against Borecount services on the demo server. bigint and Date values are serialized as strings for display.' : 'cURL uses $ACCESS_TOKEN. The browser keeps the sandbox token in memory; session credentials are HttpOnly.'}</p>
+      </> : <p className="muted">Executions appear here as you explore.</p>}</div></div>
+    </section>
     </section>
     <footer><div className="brand"><span className="mark">B</span>Borecount</div><p>Open-source double-entry ledger infrastructure.</p><div><a href="/docs?demo=1" target="_blank" rel="noreferrer">API docs</a><a href="/openapi.yaml" target="_blank" rel="noreferrer">OpenAPI</a></div></footer>
-  </main>;
+  </main></ModeContext.Provider>;
 }

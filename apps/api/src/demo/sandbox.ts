@@ -6,6 +6,7 @@ import { OverdraftPolicy } from '@borecount/core/account';
 import { generateUuidV7, TenantId } from '@borecount/core/base';
 import { createUnitOfWork, type DbClient } from '@borecount/postgres-adapter';
 import { demoSessions } from './schema';
+import { registerLibrary } from './library';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import { RateLimitExceededError } from '../api/errors';
@@ -32,6 +33,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     if (!row) throw new UnauthorizedError('Demo session expired. Start a new sandbox.');
     return row;
   };
+  registerLibrary(server, services, session);
   const payload = async (row: Record<string, any>) => ({
     access_token: issueAccessToken({ tenantId: row.tenant_id, apiKeyId: row.api_key_id, role: ApiKeyRole.SERVICE }, jwt),
     expires_in: jwt.accessTokenTtlSeconds,

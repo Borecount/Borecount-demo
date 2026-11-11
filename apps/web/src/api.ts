@@ -1,7 +1,10 @@
 import type * as Contract from './generated-contract';
+import { toLibraryCall, type LibraryCall } from '../../../shared/library';
+export { libraryCode, toLibraryCall, toRestRequest, type LibraryCall } from '../../../shared/library';
+export type DemoMode = 'rest' | 'library';
 export type Json = Contract.Json;
-export interface DemoRequest { method: 'GET' | 'POST'; path: string; body?: Record<string, Json>; }
-export interface RequestRecord { id: number; request: DemoRequest; status: number; response: Json; duration: number; requestId: string | null; foreground?: boolean; }
+export interface DemoRequest { method: 'GET' | 'POST'; path: string; body?: Record<string, Json>; libraryCall?: LibraryCall; }
+export interface RequestRecord { id: number; request: DemoRequest; status: number; response: Json; duration: number; requestId: string | null; foreground?: boolean; mode?: DemoMode | 'host'; call?: LibraryCall; }
 export interface Page<T> { data: T[]; next_cursor: string | null; }
 export type Ledger = Contract.Ledger;
 export type Account = Contract.Account;
@@ -14,6 +17,13 @@ export class DemoApiError extends Error {
   constructor(public status: number, public payload: Json) { super(typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? `${payload.error ?? 'ERROR'}: ${payload.message ?? 'Request failed'}` : 'Request failed'); }
 }
 let token = '';
+let mode: DemoMode = 'rest';
+const pending = new Set<AbortController>();
+export function setDemoMode(next: DemoMode) {
+  mode = next;
+  for (const controller of pending) controller.abort();
+  pending.clear();
+}
 let observer: (record: RequestRecord) => void = () => {};
 let recordId = 0;
 export function redact(value: Json): Json {
@@ -31,29 +41,47 @@ export async function request<T = Record<string, Json>>(operation: DemoRequest, 
   if (!/^\/(?:v1\/|demo\/session(?:[/?]|$))/.test(operation.path) || operation.path.includes('\\') || operation.path.includes('#')) throw new Error('Use a local /v1/ or sandbox path');
   const url = new URL(operation.path, window.location.origin);
   if (url.origin !== window.location.origin || !/^\/(?:v1\/|demo\/session(?:[/?]|$))/.test(url.pathname)) throw new Error('Use a local API endpoint');
+  const executionMode = operation.path.startsWith('/v1/') ? mode : 'host';
+  const call = executionMode === 'library' ? operation.libraryCall ?? toLibraryCall(operation) : undefined;
+  const controller = new AbortController();
+  if (executionMode !== 'host') pending.add(controller);
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const start = performance.now();
   let status = 0;
   let responseBody: Json = null;
+  let value: Json | undefined;
+  let actualCall = call;
   let requestId: string | null = null;
   try {
-    const response = await fetch(url.pathname + url.search, {
-      method: operation.method, signal, credentials: 'same-origin',
-      headers: { ...(token && operation.path.startsWith('/v1/') ? { authorization: `Bearer ${token}` } : {}),
-        ...(operation.body === undefined ? {} : { 'content-type': 'application/json' }) },
-      body: operation.body === undefined ? undefined : JSON.stringify(operation.body),
+    const response = await fetch(call ? '/demo/library/execute' : url.pathname + url.search, {
+      method: call ? 'POST' : operation.method, signal: requestSignal, credentials: 'same-origin',
+      headers: { ...(executionMode === 'rest' && token ? { authorization: `Bearer ${token}` } : {}),
+        ...(call || operation.body !== undefined ? { 'content-type': 'application/json' } : {}) },
+      body: call ? JSON.stringify(call) : operation.body === undefined ? undefined : JSON.stringify(operation.body),
     });
     status = response.status;
     requestId = response.headers.get('x-request-id');
     const raw = await response.text();
     try { responseBody = raw ? JSON.parse(raw) : null; } catch { responseBody = raw; }
     if (!response.ok) throw new DemoApiError(status, responseBody);
+    if (call) {
+      const envelope = responseBody as unknown as { result: Json; value: Json; call: LibraryCall };
+      value = envelope.value;
+      actualCall = envelope.call;
+      return envelope.result as T;
+    }
     return responseBody as T;
   } finally {
-    // Session responses contain a token; never put credentials into the request journal.
-    const safe = redact(responseBody);
-    if (!signal?.aborted) observer({ id: ++recordId, request: structuredClone(operation), status, response: safe, requestId, foreground, duration: Math.round(performance.now() - start) });
+    pending.delete(controller);
+    if (!requestSignal.aborted) observer({
+      id: ++recordId, request: structuredClone({ ...operation, ...(call ? { libraryCall: call } : {}) }),
+      mode: executionMode, call: actualCall,
+      status, response: redact(call && value !== undefined ? value : responseBody), requestId, foreground,
+      duration: Math.round(performance.now() - start),
+    });
   }
 }
+
 export const query = (path: string, values: Record<string, string | number | undefined>) => {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => { if (value !== undefined && value !== '') params.set(key, String(value)); });
