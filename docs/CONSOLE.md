@@ -36,8 +36,8 @@ Read panels accept endpoint-specific `where` JSON, for example `{"status":{"eq":
 
 ## Host boundaries
 
-`POST /demo/session` provisions a private tenant and returns a short-lived SERVICE bearer. `GET /demo/session` renews the bearer using the HttpOnly, SameSite=Strict session cookie; it is Secure behind HTTPS. `New sandbox` replaces only this session. Tabs in the same browser profile share the cookie; a stale tab's revoked token requires a new page load.
+`POST /demo/session` provisions a private tenant and returns a short-lived SERVICE bearer. `GET /demo/session` renews the bearer using the HttpOnly, SameSite=Strict session cookie; it is Secure behind HTTPS. Session creation and Library execution require either `Sec-Fetch-Site: same-origin` or an `Origin` host matching the request Host; cross-site requests and requests with neither signal are rejected. `New sandbox` replaces only this session. Tabs in the same browser profile share the cookie; a stale tab's revoked token requires a new page load.
 
 The Holds panel uses one cursor-paginated list from `GET /v1/holds`, scoped to the selected ledger. Choose **All states**, **Active (HELD)**, **Applied (APPLIED)**, or **Voided (VOIDED)** to filter the same list; changing the state clears the current cursor. Pages default to 50 holds.
 
-In REST API mode, business requests use the public `/v1` contract with the session's SERVICE bearer. Library mode calls the allowlisted services directly on the demo server, scoped to the active sandbox. The host owns session metadata and tenant provisioning; financial rules remain in the released packages.
+In REST API mode, business requests use the public `/v1` contract with the session's SERVICE bearer. Library mode calls the allowlisted services directly on the demo server, scoped to the active sandbox. Mutating Library calls share the REST write quota; Library reads do not consume it. The host owns session metadata and tenant provisioning; financial rules remain in the released packages.

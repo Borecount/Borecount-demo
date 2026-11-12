@@ -48,6 +48,10 @@ Swagger UI assets are served locally under `/docs/`. The presentation JSON at `/
 
 Legacy financial wrappers and global reset routes are absent. The host exposes session provisioning and the Library execution bridge. See [CONSOLE.md](docs/CONSOLE.md) and [OPERATIONS.md](docs/OPERATIONS.md).
 
+The server registry in `apps/api/src/demo/library-registry.ts` binds each allowed operation to a typed service call, explicit result mapper, and filter policy. `library-validation.ts` derives camelCase input schemas from the canonical document supplied by the host. The bridge compiles those schemas before accepting traffic, validates the editor input, then constructs trusted service arguments. REST and Library mutations consume the same configured write quota per source IP.
+
+The browser composition in `App.tsx` uses `useSandbox` for data and request lifecycle, `useExecutionMode` for guarded mode changes, `useJournal` for execution history, and `useWorkflow` for drafts and guided steps. Each workspace section renders through its own component. Scenario data lives in `workflows.ts`; an invalid draft keeps its current mode and remains editable until repaired.
+
 ## Tenancy and authentication flow
 
 1. `bootstrap:admin-key` atomically creates the initial tenant and hashed `ADMIN` API key only when `api_keys` is empty.
