@@ -194,3 +194,47 @@ test('invalid Library arguments produce a journal error and copying the example 
   await expect(page.getByRole('alert')).toBeVisible();
   expect(unhandled).toEqual([]);
 });
+
+test('invalid drafts stay editable when switching integration mode', async ({ page }) => {
+  await ready(page);
+  await page
+    .locator('.scenario-card')
+    .filter({
+      has: page.getByRole('heading', { name: 'Wallet', exact: true }),
+    })
+    .click();
+  const restDraft = page.getByLabel('Request JSON', { exact: true });
+  const validRestDraft = await restDraft.inputValue();
+  await restDraft.fill('{ unfinished');
+  await modes(page).getByRole('button', { name: 'Library', exact: true }).click();
+  await expect(modes(page).getByRole('button', { name: 'REST API', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(restDraft).toHaveValue('{ unfinished');
+  await expect(page.getByRole('alert')).toContainText(
+    'Fix the current draft before switching modes',
+  );
+  await expect(page.locator('.scenario-banner')).toContainText('Wallet');
+
+  await restDraft.fill(validRestDraft);
+  await library(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const libraryDraft = page.getByLabel('Library arguments', { exact: true });
+  const validLibraryDraft = await libraryDraft.inputValue();
+  await libraryDraft.fill('{ unfinished library');
+  await modes(page).getByRole('button', { name: 'REST API', exact: true }).click();
+  await expect(modes(page).getByRole('button', { name: 'Library', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(libraryDraft).toHaveValue('{ unfinished library');
+  await expect(page.getByRole('alert')).toContainText(
+    'Fix the current draft before switching modes',
+  );
+  await libraryDraft.fill(validLibraryDraft);
+  await modes(page).getByRole('button', { name: 'REST API', exact: true }).click();
+  await expect(restDraft).toBeVisible();
+  expect(JSON.parse(await restDraft.inputValue())).toEqual(JSON.parse(validRestDraft));
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
