@@ -17,18 +17,18 @@ import type {
   LibraryExecutionResponse,
 } from '../../../../shared/library-types';
 import type { JsonSchema, OpenApiDocument } from '../api/openapi-types';
-import type { OperationSchemas, ResultMapper } from './library-types';
+import type { OperationSchemas, ResultMapper, LibraryRateLimit } from './library-types';
 import type { SandboxIdentity } from './sandbox-types';
-import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
+import { LibraryInputError } from './library-input-error';
+import { isSameOrigin } from './same-origin';
 import { RateLimitExceededError } from '../api/errors';
 
 const specification = parse(
   readFileSync(new URL('../../../../openapi/openapi.yaml', import.meta.url), 'utf8'),
 ) as OpenApiDocument;
 
-function invalidInput(message: string): never {
-  // The existing server error handler recognizes validation errors and returns INVALID_INPUT.
-  throw Object.assign(new Error(message), { validation: [], code: 'INVALID_INPUT' });
+function invalidInput(message: string, cause?: unknown): never {
+  throw new LibraryInputError(message, { cause });
 }
 
 function serializeForBrowser(value: unknown): unknown {
@@ -112,7 +112,20 @@ function buildOperationSchemas(operation: LibraryOperation): OperationSchemas {
       properties: queryProperties,
       required: requiredQueryParameters,
     },
-    parameter: parameters.find((parameter) => parameter.in === 'path')?.schema,
+    // Fastify and AJV cache by schema identity. Keep the complete wrapper stable,
+    // not just the inner UUID schema, to avoid retaining a new validator per request.
+    resourceId: operation.parameter
+      ? {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: parameters.find((parameter) => parameter.in === 'path')?.schema ?? {
+              type: 'string',
+              format: 'uuid',
+            },
+          },
+        }
+      : undefined,
   };
 }
 
@@ -212,18 +225,6 @@ function toDisplayResult(operation: string, value: unknown): unknown {
   }
 }
 
-function isSameOrigin(request: FastifyRequest): boolean {
-  if (request.headers['sec-fetch-site'] === 'cross-site') return false;
-  const origin = request.headers.origin;
-  if (!origin || request.headers['sec-fetch-site'] === 'same-origin') return true;
-
-  try {
-    return new URL(origin).host === request.headers.host;
-  } catch {
-    return false;
-  }
-}
-
 const authorityFields = new Set([
   'tenantId',
   'tenant_id',
@@ -275,22 +276,14 @@ function prepareServiceArguments(
   let restRequest;
   try {
     restRequest = toRestRequest(call);
-  } catch {
-    return invalidInput('Invalid library arguments');
+  } catch (cause) {
+    return invalidInput('Invalid library arguments', cause);
   }
 
   const url = new URL(restRequest.path, 'http://demo.invalid');
   const schemas = schemasByOperation.get(call.operation)!;
   if (operation.parameter) {
-    validateSchema(
-      request,
-      {
-        type: 'object',
-        required: ['id'],
-        properties: { id: schemas.parameter ?? { type: 'string', format: 'uuid' } },
-      },
-      { id: call.input[operation.parameter] },
-    );
+    validateSchema(request, schemas.resourceId!, { id: call.input[operation.parameter] });
   }
 
   if (restRequest.method === 'POST') {
@@ -321,8 +314,8 @@ function prepareServiceArguments(
   let args: unknown[];
   try {
     args = libraryArguments(call, identity.tenant_id, identity.api_key_id);
-  } catch {
-    return invalidInput('Invalid typed library arguments');
+  } catch (cause) {
+    return invalidInput('Invalid typed library arguments', cause);
   }
 
   if (!operation.positional) {
@@ -353,22 +346,12 @@ export function registerLibrary(
   server: FastifyInstance,
   services: ApplicationServices,
   resolveSession: (request: FastifyRequest) => Promise<SandboxIdentity>,
+  { rateLimiter, writePolicy }: LibraryRateLimit,
 ): void {
-  const limiter = new FixedWindowLimiter();
-
   server.post<{ Body: LibraryCall }>(
     '/demo/library/execute',
     {
       bodyLimit: 1024 * 1024,
-      errorHandler(error, _request, reply) {
-        if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
-          return reply.code(413).send({
-            error: 'PAYLOAD_TOO_LARGE',
-            message: 'Library request exceeds the 1 MiB limit',
-          });
-        }
-        throw error;
-      },
       schema: {
         body: {
           type: 'object',
@@ -394,11 +377,14 @@ export function registerLibrary(
       const identity = await resolveSession(request);
       request.tenantId = identity.tenant_id;
       request.apiKeyId = identity.api_key_id;
-      const quota = limiter.consume(identity.api_key_id, { maxRequests: 600, windowSeconds: 60 });
-      if (!quota.allowed) throw new RateLimitExceededError(quota.retryAfterSeconds);
-
       const call = request.body;
       const operation = operationDefinition(call.operation);
+      // A Library read uses POST for transport but does not spend the write
+      // allowance. Mutations share the same per-IP bucket as REST writes.
+      if (operation.method === 'POST') {
+        const quota = rateLimiter.consume(`write:${request.ip}`, writePolicy);
+        if (!quota.allowed) throw new RateLimitExceededError(quota.retryAfterSeconds);
+      }
       const args = prepareServiceArguments(request, call, operation, identity);
       const value = await invokeService(services, call.operation, args);
       const executedInput = operation.positional

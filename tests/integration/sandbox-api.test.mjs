@@ -9,7 +9,7 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   const journal = [];
   const call = async (method, path, body, expected) => {
     const response = await fetch(apiUrl + path, { method,
-      headers: { ...(cookie ? { cookie } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { ...(cookie ? { cookie } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}), ...(method === 'POST' && path === '/demo/session' ? { origin: apiUrl, 'sec-fetch-site': 'same-origin' } : {}) },
       body: body ? JSON.stringify(body) : undefined });
     const result = await response.json();
     if (expected !== undefined) assert.equal(response.status, expected, `${method} ${path}: ${JSON.stringify(result)}`);
@@ -20,6 +20,8 @@ export async function testSandbox(apiUrl, databaseUrl = process.env.DATABASE_URL
   await call('GET', '/demo/session', undefined, 401);
   const csrf = await fetch(apiUrl + '/demo/session', { method: 'POST', headers: { origin: 'https://external.example', 'sec-fetch-site': 'cross-site' } });
   assert.equal(csrf.status, 403);
+  const missingOrigin = await fetch(apiUrl + '/demo/session', { method: 'POST' });
+  assert.equal(missingOrigin.status, 403);
   const first = (await call('POST', '/demo/session', undefined, 201)).body;
   assert.ok(first.access_token); token = first.access_token;
   const firstCookie = cookie, firstToken = token;

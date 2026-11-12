@@ -15,6 +15,8 @@ export async function testLibrary(apiUrl, databaseUrl) {
       headers: {
         cookie,
         'content-type': 'application/json',
+        origin: apiUrl,
+        'sec-fetch-site': 'same-origin',
         ...extra,
       },
       body: JSON.stringify(body),
@@ -28,7 +30,7 @@ export async function testLibrary(apiUrl, databaseUrl) {
   async function start() {
     const response = await fetch(apiUrl + '/demo/session', {
       method: 'POST',
-      headers: { cookie },
+      headers: { cookie, origin: apiUrl, 'sec-fetch-site': 'same-origin' },
     });
 
     assert.equal(response.status, 201);
@@ -51,6 +53,19 @@ export async function testLibrary(apiUrl, databaseUrl) {
   // Check authentication, origin, operation allowlisting, and input validation.
   await send('/demo/library/execute', { operation: 'ledgers.list', input: {} }, 401);
   const session = await start();
+  const missingOriginResponse = await fetch(apiUrl + '/demo/library/execute', {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ operation: 'ledgers.list', input: {} }),
+  });
+  assert.equal(missingOriginResponse.status, 403);
+
+  const sameSiteMetadataResponse = await fetch(apiUrl + '/demo/library/execute', {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+    body: JSON.stringify({ operation: 'ledgers.list', input: {} }),
+  });
+  assert.equal(sameSiteMetadataResponse.status, 200);
   await send('/demo/library/execute', { operation: 'ledgers.list', input: {} }, 403, {
     origin: 'https://evil.example',
     'sec-fetch-site': 'cross-site',

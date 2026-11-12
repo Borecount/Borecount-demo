@@ -1,5 +1,6 @@
 import { parseJwtAuthConfig } from '@api/auth/policy';
 import { parseRateLimitConfig } from '@api/rate-limit/policy';
+import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
 import { createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
 import { isMainModule } from './utils/is-main-module';
@@ -45,10 +46,13 @@ export const run = async (): Promise<void> => {
   });
   const services = createApplicationServices(dbClient);
   const jwtAuth = parseJwtAuthConfig(process.env);
+  const rateLimit = parseRateLimitConfig(process.env);
+  const rateLimiter = new FixedWindowLimiter();
   registerApplication(server, {
     services,
     jwtAuth,
-    rateLimit: parseRateLimitConfig(process.env),
+    rateLimit,
+    rateLimiter,
     authorizeAdjustment: async ({ tenantId, apiKeyId, apiKeyRole }) => {
       if (apiKeyRole !== ApiKeyRole.ADMIN) {
         const [sandbox] = await dbClient.sql`select id from demo_sessions
@@ -58,7 +62,10 @@ export const run = async (): Promise<void> => {
       return { actorId: apiKeyId };
     },
   });
-  registerSandbox(server, dbClient, services, jwtAuth);
+  registerSandbox(server, dbClient, services, jwtAuth, {
+    rateLimiter,
+    writePolicy: rateLimit.write,
+  });
   const port = parsePort(process.env.PORT);
   const shutdownTimeoutMs = parseShutdownTimeout(process.env.SHUTDOWN_TIMEOUT_MS);
 

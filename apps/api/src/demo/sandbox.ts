@@ -8,6 +8,8 @@ import { createUnitOfWork, type DbClient } from '@borecount/postgres-adapter';
 import { demoSessions } from './schema';
 import { registerLibrary } from './library';
 import type { SandboxSession } from './sandbox-types';
+import type { LibraryRateLimit } from './library-types';
+import { isSameOrigin } from './same-origin';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import { RateLimitExceededError } from '../api/errors';
@@ -22,7 +24,7 @@ const hash = (value: string) => createHash('sha256').update(value, 'utf8').diges
 const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split(';')
   .map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 
-export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig) {
+export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryRateLimit: LibraryRateLimit) {
   const limiter = new FixedWindowLimiter();
   const unitOfWork = createUnitOfWork(db);
   const session = async (request: FastifyRequest): Promise<SandboxSession> => {
@@ -34,7 +36,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     if (!row) throw new UnauthorizedError('Demo session expired. Start a new sandbox.');
     return row;
   };
-  registerLibrary(server, services, session);
+  registerLibrary(server, services, session, libraryRateLimit);
   const payload = async (row: SandboxSession) => ({
     access_token: issueAccessToken({ tenantId: row.tenant_id, apiKeyId: row.api_key_id, role: ApiKeyRole.SERVICE }, jwt),
     expires_in: jwt.accessTokenTtlSeconds,
@@ -58,12 +60,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
 
   server.post('/demo/session', async (request, reply) => {
     // A new tenant is host provisioning, not part of the library's financial API.
-    if (request.headers['sec-fetch-site'] === 'cross-site') return reply.code(403).send({ error: 'FORBIDDEN', message: 'Same-origin session creation required' });
-    const origin = request.headers.origin;
-    // Browsers set Sec-Fetch-Site before a reverse proxy can rewrite Host/Origin.
-    let sameOrigin = request.headers['sec-fetch-site'] === 'same-origin' || !origin;
-    try { sameOrigin ||= new URL(origin!).host === request.headers.host; } catch { /* Reject malformed Origin. */ }
-    if (!sameOrigin) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Same-origin session creation required' });
+    if (!isSameOrigin(request)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Same-origin session creation required' });
     const decision = limiter.consume(request.ip, { maxRequests: 20, windowSeconds: 3600 });
     if (!decision.allowed) throw new RateLimitExceededError(decision.retryAfterSeconds);
     const secret = randomBytes(32).toString('hex');

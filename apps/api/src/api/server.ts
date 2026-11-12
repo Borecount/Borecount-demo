@@ -255,6 +255,13 @@ export const createServerCore = (options: CreateServerCoreOptions): FastifyInsta
   });
 
   server.setErrorHandler((error, request, reply) => {
+    if (error instanceof Error && 'code' in error && error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.status(413).send({
+        error: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body is too large',
+      });
+    }
+
     if (error instanceof RateLimitExceededError) {
       reply.header('retry-after', String(error.retryAfterSeconds));
       return reply.status(429).send({
@@ -300,14 +307,15 @@ export const registerApplication = (
     jwtAuth,
     rateLimit,
     authorizeAdjustment,
+    rateLimiter = new FixedWindowLimiter(),
   }: {
     services: ApplicationServices;
     jwtAuth: JwtAuthConfig;
     rateLimit: RateLimitConfig;
+    rateLimiter?: FixedWindowLimiter;
     authorizeAdjustment: AdjustmentAuthorizationHook<FastifyRequest>;
   },
 ): void => {
-  const rateLimiter = new FixedWindowLimiter();
   const metrics = new ApiMetrics();
 
   server.decorateRequest('tenantId');
