@@ -11,6 +11,7 @@ import { ApiMetrics } from '@api/observability/metrics';
 import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
 import type { EndpointRateLimitConfig, RateLimitConfig } from '@api/rate-limit/policy';
 import type { CreateServerCoreOptions } from '@api/server-types';
+import type { OpenApiDocument } from '@api/openapi-types';
 import type { ApplicationServices } from '@borecount/core/application';
 import { ApiKeyRole } from '@borecount/core/application';
 import { ForbiddenError, UnauthorizedError } from '@borecount/core/errors';
@@ -29,14 +30,20 @@ const TOKEN_ENDPOINT = '/v1/auth/token';
 const V1_ROUTE_PREFIX = '/v1/';
 const OPENAPI_SPEC_PATH = fileURLToPath(new URL('../../../../openapi/openapi.yaml', import.meta.url));
 const OPENAPI_SPEC_CONTENT = readFileSync(OPENAPI_SPEC_PATH, 'utf8');
-const SWAGGER_SPEC = parseYaml(OPENAPI_SPEC_CONTENT);
+// Validation and documentation share the parsed canonical document. Swagger's
+// presentation tags and server URL belong to a separate copy.
+export const canonicalOpenApi = parseYaml(OPENAPI_SPEC_CONTENT) as OpenApiDocument;
+const SWAGGER_SPEC = structuredClone(canonicalOpenApi);
 // Presentation-only grouping and same-origin server URL. The downloadable YAML stays canonical.
 SWAGGER_SPEC.servers = [{ url: '/' }];
 const ROUTE_TAGS: Record<string, string> = { ledgers: 'Ledgers', accounts: 'Accounts', transactions: 'Transactions',
   entries: 'Entries', holds: 'Holds', 'credit-grants': 'Credit grants', adjustments: 'Adjustments',
   reconciliation: 'Reconciliation', admin: 'Administration', auth: 'Authentication' };
-for (const [path, methods] of Object.entries(SWAGGER_SPEC.paths) as [string, Record<string, { tags?: string[] }>][]) {
-  for (const method of ['get', 'post']) if (methods[method]) methods[method].tags = [ROUTE_TAGS[path.split('/')[2]] ?? 'Operations'];
+for (const [path, methods] of Object.entries(SWAGGER_SPEC.paths)) {
+  for (const method of ['get', 'post'] as const) {
+    const operation = methods[method];
+    if (operation) operation.tags = [ROUTE_TAGS[path.split('/')[2]] ?? 'Operations'];
+  }
 }
 const SWAGGER_UI_HTML = `<!doctype html>
 <html lang="en">
@@ -251,6 +258,13 @@ export const createServerCore = (options: CreateServerCoreOptions): FastifyInsta
   });
 
   server.setErrorHandler((error, request, reply) => {
+    if (error instanceof Error && 'code' in error && error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.status(413).send({
+        error: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body is too large',
+      });
+    }
+
     if (error instanceof RateLimitExceededError) {
       reply.header('retry-after', String(error.retryAfterSeconds));
       return reply.status(429).send({
@@ -296,14 +310,15 @@ export const registerApplication = (
     jwtAuth,
     rateLimit,
     authorizeAdjustment,
+    rateLimiter = new FixedWindowLimiter(),
   }: {
     services: ApplicationServices;
     jwtAuth: JwtAuthConfig;
     rateLimit: RateLimitConfig;
+    rateLimiter?: FixedWindowLimiter;
     authorizeAdjustment: AdjustmentAuthorizationHook<FastifyRequest>;
   },
 ): void => {
-  const rateLimiter = new FixedWindowLimiter();
   const metrics = new ApiMetrics();
 
   server.decorateRequest('tenantId');

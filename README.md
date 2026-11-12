@@ -2,7 +2,7 @@
 
 Interactive reference console composing `@borecount/core`, Fastify, Drizzle, PostgreSQL, and React into wallets, marketplace settlement, authorizations, prepaid credits, and finance workflows. The checked-in Borecount contract is [OpenAPI 0.8.0](openapi/openapi.yaml).
 
-The browser sends actual `/v1/*` requests using the released OpenAPI payloads and responses. Each browser session gets an isolated tenant, USD/EUR ledgers, six accounts per ledger, and a short-lived SERVICE token. Bootstrap administrative credentials remain server-side. The **API docs** link opens locally served Swagger UI with authenticated **Try it out** in a separate tab.
+Use the global **REST API / Library** switch to explore the same sandbox through either the public HTTP contract or direct library services. REST API mode sends actual `/v1/*` requests using the released OpenAPI payloads and responses. Library mode invokes allowlisted services on the demo server and shows method, arguments, example code, and result; JSON boundary values represent `bigint` and `Date` as strings. Both modes use the same isolated tenant, USD/EUR ledgers, and opening balances. The **API docs** link opens locally served Swagger UI with authenticated **Try it out** in a separate tab.
 
 See [the console guide](docs/CONSOLE.md) for every scenario, endpoint family, and sandbox boundary.
 
@@ -80,9 +80,9 @@ Both return `HTTP/1.1 200 OK` and:
 
 Open `http://localhost:5173`. The first visit provisions a private sandbox: Alice starts with 100.00 USD and Bob with zero; Eva starts with 175.00 EUR and Leo with zero.
 
-Choose one of five guided scenarios, or open Accounts, Transactions, Holds, Credits, Reconciliation, and Reports. Every operation exposes editable canonical JSON; the request journal shows real HTTP status, body, timing, and request ID. **New sandbox** provisions a new tenant and revokes only the previous session's credential.
+Choose REST API or Library, then use any of the five guided scenarios or the Accounts, Transactions, Holds, Credits, Reconciliation, and Reports sections. REST API mode exposes editable canonical JSON and an HTTP request journal. Library mode shows native method calls with arguments, example code, and results. Switching modes keeps the current sandbox and its data. **New sandbox** provisions a new tenant and revokes only the previous session's credential.
 
-Each browser session provisions a private SERVICE-only tenant and its opening data. The host exposes no shared demo state, financial wrapper routes, or database reset endpoint.
+Each browser session provisions a private SERVICE-only tenant and its opening data. The host exposes no shared demo state or database reset endpoint. The Library bridge exposes only its allowlisted service methods.
 
 ## Automated verification
 
@@ -98,7 +98,7 @@ Then run the complete verification pipeline:
 npm test
 ```
 
-The pipeline checks unit helpers, canonical OpenAPI equality, generated client types, schema drift, TypeScript, and the production build. It recreates only `luxledger_demo_test`, checks real `/v1` workflows (isolation, retries, rollback, partial captures, refunds, expiration, statements and reconciliation), then exercises the console, CSV import, Swagger execution and mobile layout in Chromium. The test database guard rejects any `DATABASE_URL_TEST` whose database name is not exactly `luxledger_demo_test`.
+The pipeline checks unit helpers, canonical OpenAPI equality, generated client types, schema drift, TypeScript, and the production build. It recreates only `luxledger_demo_test`, checks real `/v1` workflows (isolation, retries, rollback, partial captures, refunds, expiration, statements and reconciliation), then exercises the console, CSV import, Swagger execution, Library mode and mobile layout in Chromium. The test database guard rejects any `DATABASE_URL_TEST` whose database name is not exactly `luxledger_demo_test`.
 
 Individual commands are `npm run test:unit`, `npm run verify:openapi`, `npm run test:integration`, and `npm run test:e2e`.
 

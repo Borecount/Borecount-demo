@@ -1,6 +1,6 @@
 # Borecount Demo Architecture
 
-This repository is a composition root, not a second implementation of ledger rules. Its purpose is to show how the published Borecount packages become a deployable HTTP service.
+This repository is a composition root, not a second implementation of ledger rules. It demonstrates the published Borecount packages through REST API and direct library integrations.
 
 ## Boundaries and dependency direction
 
@@ -40,13 +40,17 @@ Changes to business rules belong in the relevant Borecount package. Demo code sh
 
 `apps/api/src/demo/sandbox.ts` owns private demo provisioning: a tenant, SERVICE credential, USD/EUR assets and ledgers, and deterministic opening balances. It persists only a hash of the HttpOnly session secret in the host-owned `demo_sessions` table. Financial seed postings use public library services; tenant/key provisioning belongs to the host because it is not exposed by the released REST API.
 
-The browser sends financial reads/writes directly to canonical `/v1/*` routes. Frontend DTOs are generated from the installed OpenAPI, and CI verifies both canonical YAML equality and generated-type freshness. Human-readable account names are labels; canonical requests carry UUIDs, signed minor-unit strings, references, metadata and timestamps.
+The global REST API / Library selector controls every financial read and write. REST mode uses canonical `/v1/*` routes. Library mode sends an allowlisted operation and structured arguments to `/demo/library/execute`, which calls application services directly. `shared/library.ts` maps each operation to its service method and produces copyable Node.js examples. Both modes use the same sandbox and database state. Native results are recorded separately from the normalized display model, with `bigint` and `Date` serialized as strings at the browser boundary. Frontend DTOs are generated from the installed OpenAPI, and CI verifies both canonical YAML equality and generated-type freshness. Human-readable account names are labels; canonical requests carry UUIDs, signed minor-unit strings, references, metadata and timestamps.
 
-`GET /demo/session` renews the short-lived bearer until the fixed eight-hour session expiry. Replacing a sandbox provisions a new tenant and revokes only the old service key. A host auth hook also enforces the persisted session boundary on `/v1` calls. The browser never receives the bootstrap ADMIN key. The only presentation SQL read, `/demo/session/holds`, is scoped by cookie-authenticated tenant and requested ledger, paginated, and establishes transaction-local RLS context. The library has no public hold-list operation; all hold mutations use the canonical adapter.
+`GET /demo/session` renews the short-lived bearer until the fixed eight-hour session expiry. Replacing a sandbox provisions a new tenant and revokes only the old service key. A host auth hook also enforces the persisted session boundary on `/v1` calls. The browser never receives the bootstrap ADMIN key. The Library bridge independently authenticates the sandbox cookie, checks expiry and revocation, validates inputs, enforces same-origin execution and rate limits, and supplies tenant and actor context. Its allowlist excludes credential administration and provisioning. Hold reads use the public hold service in both modes.
 
 Swagger UI assets are served locally under `/docs/`. The presentation JSON at `/demo/contract` derives from canonical OpenAPI, adds resource grouping and a same-origin server URL, and leaves `/openapi.yaml` unchanged. Embedded `?demo=1` execution refreshes a session bearer and reports redacted request/response data to the parent journal; the parent validates message origin and frame identity.
 
-Legacy `demo-service.ts` wrappers and `POST /demo/reset` remain registered only outside production for backwards-compatible examples/tests. Global reset truncates the dedicated database and is never used by the new browser or one-command launcher. Whole-database maintenance reset is a separately guarded operator command. See [CONSOLE.md](docs/CONSOLE.md) and [OPERATIONS.md](docs/OPERATIONS.md).
+Legacy financial wrappers and global reset routes are absent. The host exposes session provisioning and the Library execution bridge. See [CONSOLE.md](docs/CONSOLE.md) and [OPERATIONS.md](docs/OPERATIONS.md).
+
+The server registry in `apps/api/src/demo/library-registry.ts` binds each allowed operation to a typed service call, explicit result mapper, and filter policy. `library-validation.ts` derives camelCase input schemas from the canonical document supplied by the host. The bridge compiles those schemas before accepting traffic, validates the editor input, then constructs trusted service arguments. REST and Library mutations consume the same configured write quota per source IP.
+
+The browser composition in `App.tsx` uses `useSandbox` for data and request lifecycle, `useExecutionMode` for guarded mode changes, `useJournal` for execution history, and `useWorkflow` for drafts and guided steps. Each workspace section renders through its own component. Scenario data lives in `workflows.ts`; an invalid draft keeps its current mode and remains editable until repaired.
 
 ## Tenancy and authentication flow
 

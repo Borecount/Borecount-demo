@@ -1,64 +1,432 @@
 import type { Account, DemoRequest, Json } from './api';
 export type Area = 'Accounts' | 'Transactions' | 'Holds' | 'Credits' | 'Reconciliation' | 'Reports';
-export interface Context { actor: string; ledger: string; currency: string; accounts: Account[]; tx: string; hold: string; grant: string; upload: string; rule: string; run: string; expirationAsOf: string; }
-export interface Operation { id: string; area: Area; title: string; help: string; build: (c: Context, ref: string) => DemoRequest; }
+export interface Context {
+  actor: string;
+  ledger: string;
+  currency: string;
+  accounts: Account[];
+  tx: string;
+  hold: string;
+  grant: string;
+  upload: string;
+  rule: string;
+  run: string;
+  expirationAsOf: string;
+}
+export interface Operation {
+  id: string;
+  area: Area;
+  title: string;
+  help: string;
+  build: (c: Context, ref: string) => DemoRequest;
+}
 type SeedRole = 'funding' | 'primary' | 'secondary' | 'fees' | 'credits' | 'usage';
-const account = (c: Context, role: SeedRole) => c.accounts.find(a => a.code === `DEMO_${role.toUpperCase()}`)?.id
-  ?? '<select-account-id>';
-export const entries = (c: Context, amount = '2500', from: SeedRole = 'primary', to: SeedRole = 'secondary') => [
+const account = (c: Context, role: SeedRole) =>
+  c.accounts.find((a) => a.code === `DEMO_${role.toUpperCase()}`)?.id ?? '<select-account-id>';
+export const entries = (
+  c: Context,
+  amount = '2500',
+  from: SeedRole = 'primary',
+  to: SeedRole = 'secondary',
+) => [
   { account_id: account(c, from), signed_amount_minor: amount, currency: c.currency },
   { account_id: account(c, to), signed_amount_minor: `-${amount}`, currency: c.currency },
 ];
-const tx = (c: Context, reference: string, amount = '2500') => ({ ledger_id: c.ledger, reference, currency: c.currency,
-  description: 'Wallet payment', metadata: { order_id: reference, provider: { payment_id: 'pay_1042' } }, entries: entries(c, amount) });
-const post = (path: string, body?: Record<string, Json>): DemoRequest => ({ method: 'POST', path, ...(body ? { body } : {}) });
+const tx = (c: Context, reference: string, amount = '2500') => ({
+  ledger_id: c.ledger,
+  reference,
+  currency: c.currency,
+  description: 'Wallet payment',
+  metadata: { order_id: reference, provider: { payment_id: 'pay_1042' } },
+  entries: entries(c, amount),
+});
+const post = (path: string, body?: Record<string, Json>): DemoRequest => ({
+  method: 'POST',
+  path,
+  ...(body ? { body } : {}),
+});
 const get = (path: string): DemoRequest => ({ method: 'GET', path });
 export const operations: Operation[] = [
-  { id: 'ledger', area: 'Accounts', title: 'Create ledger', help: 'Create a separate accounting book. Assets USD and EUR are provisioned by the host.', build: (_, r) => post('/v1/ledgers', { name: r }) },
-  { id: 'account', area: 'Accounts', title: 'Create account', help: 'Choose side, overdraft policy and immutable grant capability.', build: (c, r) => post('/v1/accounts', { ledger_id: c.ledger, name: `wallet:${r}`, side: 'CREDIT', currency: c.currency, overdraft_policy: 'DISALLOW', grant_enabled: false }) },
-  { id: 'transfer', area: 'Transactions', title: 'Wallet transfer', help: 'Post balanced entries. Repeat the same request to see created: false without a second posting.', build: (c, r) => post('/v1/transactions', tx(c, r)) },
-  { id: 'fund', area: 'Transactions', title: 'Fund wallet', help: 'Post funding against the system account.', build: (c, r) => post('/v1/transactions', { ...tx(c, r), entries: entries(c, '10000', 'funding', 'primary') }) },
-  { id: 'marketplace', area: 'Transactions', title: 'Marketplace payment + fee', help: 'Buyer pays 25.00: seller receives 23.00 and the platform receives 2.00 atomically.', build: (c, r) => post('/v1/transactions', { ...tx(c, r), description: 'Order settlement with platform fee', entries: [
-    { account_id: account(c, 'primary'), signed_amount_minor: '2500', currency: c.currency },
-    { account_id: account(c, 'secondary'), signed_amount_minor: '-2300', currency: c.currency },
-    { account_id: account(c, 'fees'), signed_amount_minor: '-200', currency: c.currency },
-  ] }) },
-  { id: 'bulk', area: 'Transactions', title: 'Bulk payouts', help: 'Two transactions in one all-or-nothing batch. Retry the identical body to inspect idempotent_count.', build: (c, r) => post('/v1/transactions/bulk', { transactions: [tx(c, `${r}-1`, '200'), tx(c, `${r}-2`, '300')] }) },
-  { id: 'bulk-failure', area: 'Transactions', title: 'Bulk rollback', help: 'The second item is unbalanced. Neither item may commit. Look up the first reference afterwards.', build: (c, r) => post('/v1/transactions/bulk', { transactions: [tx(c, `${r}-1`, '200'), { ...tx(c, `${r}-2`), entries: [entries(c)[0], { ...entries(c)[1], signed_amount_minor: '-2499' }] }] }) },
-  { id: 'reverse', area: 'Transactions', title: 'Reverse transaction', help: 'Select a transaction below first. A reversal adds compensating entries and preserves the original.', build: (c, r) => post(`/v1/transactions/${c.tx}/reverse`, { reference: r, description: 'Customer payment reversal' }) },
-  { id: 'correct', area: 'Transactions', title: 'Correct transaction', help: 'Select an unreversed transaction. Reversal and replacement commit atomically.', build: (c, r) => post(`/v1/transactions/${c.tx}/correct`, { reversal_reference: `${r}-reversal`, corrected_reference: `${r}-corrected`, description: 'Corrected order amount', entries: entries(c, '2600') }) },
-  { id: 'backdate', area: 'Transactions', title: 'Backdated posting', help: 'Accounting time differs from ingestion time. Later balance snapshots include the backdated delta.', build: (c, r) => post('/v1/transactions', { ...tx(c, r, '100'), effective_at: new Date(Date.now() - 86400000).toISOString(), entries: entries(c, '100', 'funding', 'primary') }) },
-  { id: 'unbalanced', area: 'Transactions', title: 'Reject unbalanced entry', help: 'Expected domain failure. Balances must remain unchanged.', build: (c, r) => post('/v1/transactions', { ...tx(c, r), entries: [entries(c)[0], { ...entries(c)[1], signed_amount_minor: '-2499' }] }) },
-  { id: 'currency-failure', area: 'Transactions', title: 'Reject currency mismatch', help: 'Entries must use the transaction currency.', build: (c, r) => post('/v1/transactions', { ...tx(c, r), entries: entries(c).map(e => ({ ...e, currency: c.currency === 'USD' ? 'EUR' : 'USD' })) }) },
-  { id: 'overdraft', area: 'Transactions', title: 'Reject insufficient funds', help: 'An ordinary DISALLOW wallet cannot spend more than available balance.', build: (c, r) => post('/v1/transactions', tx(c, r, '999999999')) },
-  { id: 'hold', area: 'Holds', title: 'Reserve payment', help: 'Posted balance stays unchanged while available balance decreases.', build: (c, r) => post('/v1/holds', { ledger_id: c.ledger, reference: r, currency: c.currency, description: 'Order authorization', entries: entries(c) }) },
-  { id: 'commit', area: 'Holds', title: 'Partial capture', help: 'Select a hold. Commit 10.00 and leave the remainder reserved. Each new capture needs its own reference.', build: (c, r) => post(`/v1/holds/${c.hold}/commit`, { reference: r, amount_minor: '1000' }) },
-  { id: 'commit-all', area: 'Holds', title: 'Capture remaining', help: 'Omitting amount_minor commits the remaining reservation.', build: (c, r) => post(`/v1/holds/${c.hold}/commit`, { reference: r }) },
-  { id: 'void', area: 'Holds', title: 'Void remaining', help: 'Release the uncommitted remainder. An identical void is safe to repeat.', build: c => post(`/v1/holds/${c.hold}/void`) },
-  { id: 'grant', area: 'Credits', title: 'Issue credit grant', help: 'Fund a grant-enabled promotional account. expires_at and external_reference are optional.', build: (c, r) => post('/v1/credit-grants', { ledger_id: c.ledger, account_id: account(c, 'credits'), funding_account_id: account(c, 'funding'), reference: r, external_reference: `billing-${r}`, amount_minor: '5000', expires_at: new Date(Date.now() + 86400000).toISOString() }) },
-  { id: 'grant-expiring', area: 'Credits', title: 'Issue short-lived grant', help: 'This grant expires in 15 seconds. Wait until expiry before running expiration; preview can also inspect a future boundary.', build: (c, r) => post('/v1/credit-grants', { ledger_id: c.ledger, account_id: account(c, 'credits'), funding_account_id: account(c, 'funding'), reference: r, amount_minor: '2000', expires_at: new Date(Date.now() + 15000).toISOString() }) },
-  { id: 'consume', area: 'Credits', title: 'Consume credits', help: 'Spend credits against service usage and inspect allocation lineage.', build: (c, r) => post('/v1/transactions', { ...tx(c, r), entries: entries(c, '1200', 'credits', 'usage') }) },
-  { id: 'credit-hold', area: 'Credits', title: 'Reserve credits', help: 'Reserve promotional capacity. Reserved capacity cannot be refunded.', build: (c, r) => post('/v1/holds', { ledger_id: c.ledger, reference: r, currency: c.currency, entries: entries(c, '1000', 'credits', 'usage') }) },
-  { id: 'refund', area: 'Credits', title: 'Refund unspent grant', help: 'Select a grant and return part of its unspent, unreserved capacity.', build: (c, r) => post(`/v1/credit-grants/${c.grant}/refund`, { reference: r, amount_minor: '500' }) },
-  { id: 'grant-reverse', area: 'Credits', title: 'Reverse untouched grant', help: 'A consumed or partially refunded grant cannot be fully reversed.', build: (c, r) => post(`/v1/credit-grants/${c.grant}/reversal`, { reference: r }) },
-  { id: 'expiration-preview', area: 'Credits', title: 'Preview expiration', help: 'Read-only preview at the chosen boundary. Future timestamps are allowed for planning.', build: () => post('/v1/credit-grants/expiration/preview', { as_of: new Date().toISOString(), limit: 25 }) },
-  { id: 'expiration-run', area: 'Credits', title: 'Run expiration', help: 'Post already due expirations. as_of cannot be later than database time. Reuses the last preview boundary; regenerate preview after the short-lived grant expires.', build: c => post('/v1/credit-grants/expiration/run', { as_of: c.expirationAsOf || new Date().toISOString(), limit: 25 }) },
-  { id: 'allocations', area: 'Credits', title: 'Grant allocations', help: 'Follow consumption, compensation, expiration and refund lineage across pages.', build: c => get(`/v1/credit-grants/${c.grant}/allocations?limit=25`) },
-  { id: 'tx-allocations', area: 'Credits', title: 'Transaction allocations', help: 'See which grants funded the selected transaction.', build: c => get(`/v1/transactions/${c.tx}/credit-allocations?limit=25`) },
-  { id: 'rule', area: 'Reconciliation', title: 'Create matching rule', help: 'Criteria within a rule are ANDed; multiple selected rules are alternatives.', build: (_, r) => post('/v1/reconciliation/matching-rules', { name: r, criteria: [{ field: 'reference', operator: 'equals' }, { field: 'currency', operator: 'equals' }, { field: 'amount', operator: 'equals', amount_tolerance_minor: '0' }] }) },
-  { id: 'upload', area: 'Reconciliation', title: 'Upload external records', help: 'Edit normalized records or import CSV. The source is a simulated payment provider.', build: (c, r) => post('/v1/reconciliation/external-records', { source: 'payment-provider', records: [
-    { id: `${r}-matched`, amount_minor: c.currency === 'EUR' && c.accounts.some(a => a.code === 'DEMO_PRIMARY') ? '17500' : '10000', currency: c.currency, reference: `sandbox-${c.currency}-opening`, date: new Date().toISOString(), raw: { source_line: 1 } },
-    { id: `${r}-missing`, amount_minor: '1500', currency: c.currency, reference: 'external-only-payment', date: new Date().toISOString(), raw: { source_line: 2 } },
-  ] }) },
-  { id: 'reconcile-preview', area: 'Reconciliation', title: 'Dry run reconciliation', help: 'Create a rule and upload first. Preview matching without persisting results.', build: c => post('/v1/reconciliation/runs', { ledger_id: c.ledger, upload_id: c.upload, strategy: 'one_to_one', matching_rule_ids: [c.rule], dry_run: true }) },
-  { id: 'reconcile', area: 'Reconciliation', title: 'Run reconciliation', help: 'Persist a report, then inspect and filter paginated results.', build: c => post('/v1/reconciliation/runs', { ledger_id: c.ledger, upload_id: c.upload, strategy: 'one_to_one', matching_rule_ids: [c.rule], dry_run: false }) },
-  { id: 'recon-results', area: 'Reconciliation', title: 'Reconciliation results', help: 'Filter by status using where; every category is retained in the report.', build: c => get(`/v1/reconciliation/runs/${c.run}/results?limit=25`) },
-  ...(['credit', 'debit'] as const).map(direction => ({ id: `adjust-${direction}`, area: 'Reconciliation' as const, title: `${direction === 'credit' ? 'Credit' : 'Debit'} adjustment`, help: 'Post a balanced manual adjustment with immutable reason and actor audit data.', build: (c: Context, r: string) => post(`/v1/adjustments/${direction}`, { ledger_id: c.ledger, account_id: account(c, 'primary'), offset_account_id: account(c, 'funding'), reference: r, amount_minor: '100', description: 'Provider reconciliation adjustment', reason_code: 'PROVIDER_DIFFERENCE', actor_id: c.actor, attributes: { ticket_id: 'FIN-1042' } }) })),
-];
-export const scenarios = [
-  { name: 'Wallet', summary: 'Fund a wallet, pay another customer, retry safely and inspect insufficient funds.', steps: ['fund', 'transfer', 'overdraft'] },
-  { name: 'Marketplace', summary: 'Split an order between a seller and platform fees, then correct or reverse it.', steps: ['marketplace', 'reverse', 'transfer', 'correct'] },
-  { name: 'Authorization & capture', summary: 'Reserve 25.00, capture 10.00 and release the remaining 15.00.', steps: ['hold', 'commit', 'void'] },
-  { name: 'Prepaid credits', summary: 'Issue expiring credit grants, reserve and consume capacity, then refund and expire eligible value.', steps: ['grant', 'grant-expiring', 'credit-hold', 'consume', 'refund', 'void', 'expiration-preview', 'expiration-run', 'allocations'] },
-  { name: 'Finance', summary: 'Build matching criteria, import a provider statement and investigate differences.', steps: ['rule', 'upload', 'reconcile-preview', 'reconcile', 'recon-results', 'adjust-credit', 'reconcile'] },
+  {
+    id: 'ledger',
+    area: 'Accounts',
+    title: 'Create ledger',
+    help: 'Create a separate accounting book. Assets USD and EUR are provisioned by the host.',
+    build: (_, r) => post('/v1/ledgers', { name: r }),
+  },
+  {
+    id: 'account',
+    area: 'Accounts',
+    title: 'Create account',
+    help: 'Choose side, overdraft policy and immutable grant capability.',
+    build: (c, r) =>
+      post('/v1/accounts', {
+        ledger_id: c.ledger,
+        name: `wallet:${r}`,
+        side: 'CREDIT',
+        currency: c.currency,
+        overdraft_policy: 'DISALLOW',
+        grant_enabled: false,
+      }),
+  },
+  {
+    id: 'transfer',
+    area: 'Transactions',
+    title: 'Wallet transfer',
+    help: 'Post balanced entries. Repeat the same request to see created: false without a second posting.',
+    build: (c, r) => post('/v1/transactions', tx(c, r)),
+  },
+  {
+    id: 'fund',
+    area: 'Transactions',
+    title: 'Fund wallet',
+    help: 'Post funding against the system account.',
+    build: (c, r) =>
+      post('/v1/transactions', { ...tx(c, r), entries: entries(c, '10000', 'funding', 'primary') }),
+  },
+  {
+    id: 'marketplace',
+    area: 'Transactions',
+    title: 'Marketplace payment + fee',
+    help: 'Buyer pays 25.00: seller receives 23.00 and the platform receives 2.00 atomically.',
+    build: (c, r) =>
+      post('/v1/transactions', {
+        ...tx(c, r),
+        description: 'Order settlement with platform fee',
+        entries: [
+          { account_id: account(c, 'primary'), signed_amount_minor: '2500', currency: c.currency },
+          {
+            account_id: account(c, 'secondary'),
+            signed_amount_minor: '-2300',
+            currency: c.currency,
+          },
+          { account_id: account(c, 'fees'), signed_amount_minor: '-200', currency: c.currency },
+        ],
+      }),
+  },
+  {
+    id: 'bulk',
+    area: 'Transactions',
+    title: 'Bulk payouts',
+    help: 'Two transactions in one all-or-nothing batch. Retry the identical body to inspect idempotent_count.',
+    build: (c, r) =>
+      post('/v1/transactions/bulk', {
+        transactions: [tx(c, `${r}-1`, '200'), tx(c, `${r}-2`, '300')],
+      }),
+  },
+  {
+    id: 'bulk-failure',
+    area: 'Transactions',
+    title: 'Bulk rollback',
+    help: 'The second item is unbalanced. Neither item may commit. Look up the first reference afterwards.',
+    build: (c, r) =>
+      post('/v1/transactions/bulk', {
+        transactions: [
+          tx(c, `${r}-1`, '200'),
+          {
+            ...tx(c, `${r}-2`),
+            entries: [entries(c)[0], { ...entries(c)[1], signed_amount_minor: '-2499' }],
+          },
+        ],
+      }),
+  },
+  {
+    id: 'reverse',
+    area: 'Transactions',
+    title: 'Reverse transaction',
+    help: 'Select a transaction below first. A reversal adds compensating entries and preserves the original.',
+    build: (c, r) =>
+      post(`/v1/transactions/${c.tx}/reverse`, {
+        reference: r,
+        description: 'Customer payment reversal',
+      }),
+  },
+  {
+    id: 'correct',
+    area: 'Transactions',
+    title: 'Correct transaction',
+    help: 'Select an unreversed transaction. Reversal and replacement commit atomically.',
+    build: (c, r) =>
+      post(`/v1/transactions/${c.tx}/correct`, {
+        reversal_reference: `${r}-reversal`,
+        corrected_reference: `${r}-corrected`,
+        description: 'Corrected order amount',
+        entries: entries(c, '2600'),
+      }),
+  },
+  {
+    id: 'backdate',
+    area: 'Transactions',
+    title: 'Backdated posting',
+    help: 'Accounting time differs from ingestion time. Later balance snapshots include the backdated delta.',
+    build: (c, r) =>
+      post('/v1/transactions', {
+        ...tx(c, r, '100'),
+        effective_at: new Date(Date.now() - 86400000).toISOString(),
+        entries: entries(c, '100', 'funding', 'primary'),
+      }),
+  },
+  {
+    id: 'unbalanced',
+    area: 'Transactions',
+    title: 'Reject unbalanced entry',
+    help: 'Expected domain failure. Balances must remain unchanged.',
+    build: (c, r) =>
+      post('/v1/transactions', {
+        ...tx(c, r),
+        entries: [entries(c)[0], { ...entries(c)[1], signed_amount_minor: '-2499' }],
+      }),
+  },
+  {
+    id: 'currency-failure',
+    area: 'Transactions',
+    title: 'Reject currency mismatch',
+    help: 'Entries must use the transaction currency.',
+    build: (c, r) =>
+      post('/v1/transactions', {
+        ...tx(c, r),
+        entries: entries(c).map((e) => ({ ...e, currency: c.currency === 'USD' ? 'EUR' : 'USD' })),
+      }),
+  },
+  {
+    id: 'overdraft',
+    area: 'Transactions',
+    title: 'Reject insufficient funds',
+    help: 'An ordinary DISALLOW wallet cannot spend more than available balance.',
+    build: (c, r) => post('/v1/transactions', tx(c, r, '999999999')),
+  },
+  {
+    id: 'hold',
+    area: 'Holds',
+    title: 'Reserve payment',
+    help: 'Posted balance stays unchanged while available balance decreases.',
+    build: (c, r) =>
+      post('/v1/holds', {
+        ledger_id: c.ledger,
+        reference: r,
+        currency: c.currency,
+        description: 'Order authorization',
+        entries: entries(c),
+      }),
+  },
+  {
+    id: 'commit',
+    area: 'Holds',
+    title: 'Partial capture',
+    help: 'Select a hold. Commit 10.00 and leave the remainder reserved. Each new capture needs its own reference.',
+    build: (c, r) => post(`/v1/holds/${c.hold}/commit`, { reference: r, amount_minor: '1000' }),
+  },
+  {
+    id: 'commit-all',
+    area: 'Holds',
+    title: 'Capture remaining',
+    help: 'Omitting amount_minor commits the remaining reservation.',
+    build: (c, r) => post(`/v1/holds/${c.hold}/commit`, { reference: r }),
+  },
+  {
+    id: 'void',
+    area: 'Holds',
+    title: 'Void remaining',
+    help: 'Release the uncommitted remainder. An identical void is safe to repeat.',
+    build: (c) => post(`/v1/holds/${c.hold}/void`),
+  },
+  {
+    id: 'grant',
+    area: 'Credits',
+    title: 'Issue credit grant',
+    help: 'Fund a grant-enabled promotional account. expires_at and external_reference are optional.',
+    build: (c, r) =>
+      post('/v1/credit-grants', {
+        ledger_id: c.ledger,
+        account_id: account(c, 'credits'),
+        funding_account_id: account(c, 'funding'),
+        reference: r,
+        external_reference: `billing-${r}`,
+        amount_minor: '5000',
+        expires_at: new Date(Date.now() + 86400000).toISOString(),
+      }),
+  },
+  {
+    id: 'grant-expiring',
+    area: 'Credits',
+    title: 'Issue short-lived grant',
+    help: 'This grant expires in 15 seconds. Wait until expiry before running expiration; preview can also inspect a future boundary.',
+    build: (c, r) =>
+      post('/v1/credit-grants', {
+        ledger_id: c.ledger,
+        account_id: account(c, 'credits'),
+        funding_account_id: account(c, 'funding'),
+        reference: r,
+        amount_minor: '2000',
+        expires_at: new Date(Date.now() + 15000).toISOString(),
+      }),
+  },
+  {
+    id: 'consume',
+    area: 'Credits',
+    title: 'Consume credits',
+    help: 'Spend credits against service usage and inspect allocation lineage.',
+    build: (c, r) =>
+      post('/v1/transactions', { ...tx(c, r), entries: entries(c, '1200', 'credits', 'usage') }),
+  },
+  {
+    id: 'credit-hold',
+    area: 'Credits',
+    title: 'Reserve credits',
+    help: 'Reserve promotional capacity. Reserved capacity cannot be refunded.',
+    build: (c, r) =>
+      post('/v1/holds', {
+        ledger_id: c.ledger,
+        reference: r,
+        currency: c.currency,
+        entries: entries(c, '1000', 'credits', 'usage'),
+      }),
+  },
+  {
+    id: 'refund',
+    area: 'Credits',
+    title: 'Refund unspent grant',
+    help: 'Select a grant and return part of its unspent, unreserved capacity.',
+    build: (c, r) =>
+      post(`/v1/credit-grants/${c.grant}/refund`, { reference: r, amount_minor: '500' }),
+  },
+  {
+    id: 'grant-reverse',
+    area: 'Credits',
+    title: 'Reverse untouched grant',
+    help: 'A consumed or partially refunded grant cannot be fully reversed.',
+    build: (c, r) => post(`/v1/credit-grants/${c.grant}/reversal`, { reference: r }),
+  },
+  {
+    id: 'expiration-preview',
+    area: 'Credits',
+    title: 'Preview expiration',
+    help: 'Read-only preview at the chosen boundary. Future timestamps are allowed for planning.',
+    build: () =>
+      post('/v1/credit-grants/expiration/preview', { as_of: new Date().toISOString(), limit: 25 }),
+  },
+  {
+    id: 'expiration-run',
+    area: 'Credits',
+    title: 'Run expiration',
+    help: 'Post already due expirations. as_of cannot be later than database time. Reuses the last preview boundary; regenerate preview after the short-lived grant expires.',
+    build: (c) =>
+      post('/v1/credit-grants/expiration/run', {
+        as_of: c.expirationAsOf || new Date().toISOString(),
+        limit: 25,
+      }),
+  },
+  {
+    id: 'allocations',
+    area: 'Credits',
+    title: 'Grant allocations',
+    help: 'Follow consumption, compensation, expiration and refund lineage across pages.',
+    build: (c) => get(`/v1/credit-grants/${c.grant}/allocations?limit=25`),
+  },
+  {
+    id: 'tx-allocations',
+    area: 'Credits',
+    title: 'Transaction allocations',
+    help: 'See which grants funded the selected transaction.',
+    build: (c) => get(`/v1/transactions/${c.tx}/credit-allocations?limit=25`),
+  },
+  {
+    id: 'rule',
+    area: 'Reconciliation',
+    title: 'Create matching rule',
+    help: 'Criteria within a rule are ANDed; multiple selected rules are alternatives.',
+    build: (_, r) =>
+      post('/v1/reconciliation/matching-rules', {
+        name: r,
+        criteria: [
+          { field: 'reference', operator: 'equals' },
+          { field: 'currency', operator: 'equals' },
+          { field: 'amount', operator: 'equals', amount_tolerance_minor: '0' },
+        ],
+      }),
+  },
+  {
+    id: 'upload',
+    area: 'Reconciliation',
+    title: 'Upload external records',
+    help: 'Edit normalized records or import CSV. The source is a simulated payment provider.',
+    build: (c, r) =>
+      post('/v1/reconciliation/external-records', {
+        source: 'payment-provider',
+        records: [
+          {
+            id: `${r}-matched`,
+            amount_minor:
+              c.currency === 'EUR' && c.accounts.some((a) => a.code === 'DEMO_PRIMARY')
+                ? '17500'
+                : '10000',
+            currency: c.currency,
+            reference: `sandbox-${c.currency}-opening`,
+            date: new Date().toISOString(),
+            raw: { source_line: 1 },
+          },
+          {
+            id: `${r}-missing`,
+            amount_minor: '1500',
+            currency: c.currency,
+            reference: 'external-only-payment',
+            date: new Date().toISOString(),
+            raw: { source_line: 2 },
+          },
+        ],
+      }),
+  },
+  {
+    id: 'reconcile-preview',
+    area: 'Reconciliation',
+    title: 'Dry run reconciliation',
+    help: 'Create a rule and upload first. Preview matching without persisting results.',
+    build: (c) =>
+      post('/v1/reconciliation/runs', {
+        ledger_id: c.ledger,
+        upload_id: c.upload,
+        strategy: 'one_to_one',
+        matching_rule_ids: [c.rule],
+        dry_run: true,
+      }),
+  },
+  {
+    id: 'reconcile',
+    area: 'Reconciliation',
+    title: 'Run reconciliation',
+    help: 'Persist a report, then inspect and filter paginated results.',
+    build: (c) =>
+      post('/v1/reconciliation/runs', {
+        ledger_id: c.ledger,
+        upload_id: c.upload,
+        strategy: 'one_to_one',
+        matching_rule_ids: [c.rule],
+        dry_run: false,
+      }),
+  },
+  {
+    id: 'recon-results',
+    area: 'Reconciliation',
+    title: 'Reconciliation results',
+    help: 'Filter by status using where; every category is retained in the report.',
+    build: (c) => get(`/v1/reconciliation/runs/${c.run}/results?limit=25`),
+  },
+  ...(['credit', 'debit'] as const).map((direction) => ({
+    id: `adjust-${direction}`,
+    area: 'Reconciliation' as const,
+    title: `${direction === 'credit' ? 'Credit' : 'Debit'} adjustment`,
+    help: 'Post a balanced manual adjustment with immutable reason and actor audit data.',
+    build: (c: Context, r: string) =>
+      post(`/v1/adjustments/${direction}`, {
+        ledger_id: c.ledger,
+        account_id: account(c, 'primary'),
+        offset_account_id: account(c, 'funding'),
+        reference: r,
+        amount_minor: '100',
+        description: 'Provider reconciliation adjustment',
+        reason_code: 'PROVIDER_DIFFERENCE',
+        actor_id: c.actor,
+        attributes: { ticket_id: 'FIN-1042' },
+      }),
+  })),
 ];

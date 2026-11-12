@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process';
 import { generateApiKey } from '@borecount/core/application';
 import { createHash } from 'node:crypto';
 import postgres from 'postgres';
+import { tsImport } from 'tsx/esm/api';
+const { testLibrary } = await tsImport('./library-api.test.mjs', import.meta.url);
 import { testSandbox } from './sandbox-api.test.mjs';
 
 const databaseUrl = process.env.DATABASE_URL_TEST ??
@@ -79,7 +81,8 @@ try {
   }
 
   await testSandbox(apiUrl, databaseUrl);
-  console.log('Demo API integration passed: only private-session provisioning and public /v1 flows remain');
+  await testLibrary(apiUrl, databaseUrl);
+  console.log('Demo API integration passed: private sandboxes, canonical REST and direct library workflows');
 } finally {
   api.kill('SIGTERM');
   await new Promise((resolve) => api.once('exit', resolve));
