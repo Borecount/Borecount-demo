@@ -1,19 +1,33 @@
+import type { FastifyInstance } from 'fastify';
+import type { LibraryOperation } from '../../../../shared/library-types';
+import type { FilterFields } from '@borecount/http';
 import type { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
 import type { EndpointRateLimitConfig } from '../api/rate-limit/policy';
-import type { JsonSchema } from '../api/openapi-types';
+import type { JsonSchema, OpenApiDocument } from '../api/openapi-types';
 
-export interface OperationSchemas {
-  body: JsonSchema;
-  query: JsonSchema & { properties: Record<string, JsonSchema> };
-  resourceId?: JsonSchema;
+/** A stable, complete editor-input schema derived from the canonical contract. */
+export type LibraryInputSchema = JsonSchema & { properties: Record<string, JsonSchema> };
+
+export interface LibraryServiceOperation {
+  filterFields?: FilterFields;
+  execute(args: unknown[]): Promise<{ value: unknown; result: unknown }>;
 }
-
-// Each exported mapper accepts a different result type. The operation registry
-// pairs each mapper with its service, keeping the dynamic dispatch in one place.
-export type ResultMapper = (value: never) => unknown;
 
 /** The same instance and write policy are passed to REST and Library execution. */
 export interface LibraryRateLimit {
   rateLimiter: FixedWindowLimiter;
   writePolicy: EndpointRateLimitConfig;
+}
+
+export interface LibraryBridgeOptions extends LibraryRateLimit {
+  specification: OpenApiDocument;
+}
+
+export type LibraryInputValidator = ReturnType<NonNullable<FastifyInstance['validatorCompiler']>>;
+
+export interface PreparedLibraryOperation {
+  metadata: LibraryOperation;
+  implementation: LibraryServiceOperation;
+  schema: LibraryInputSchema;
+  validate?: LibraryInputValidator;
 }

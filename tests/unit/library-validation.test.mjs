@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { parse } from 'yaml';
 import Fastify from 'fastify';
 import { tsImport } from 'tsx/esm/api';
 
@@ -8,6 +10,10 @@ const [{ registerLibrary }, { FixedWindowLimiter }, { parseRateLimitConfig }] = 
   tsImport('../../apps/api/src/api/rate-limit/fixed-window-limiter.ts', import.meta.url),
   tsImport('../../apps/api/src/api/rate-limit/policy.ts', import.meta.url),
 ]);
+
+const specification = parse(
+  readFileSync(new URL('../../openapi/openapi.yaml', import.meta.url), 'utf8'),
+);
 
 test('parameterized library calls reuse validators instead of growing the AJV cache', async () => {
   let validatorEngine;
@@ -20,11 +26,27 @@ test('parameterized library calls reuse validators instead of growing the AJV ca
   });
   const tenantId = '00000000-0000-4000-8000-000000000001';
   const actorId = '00000000-0000-4000-8000-000000000002';
-  const services = { ledgers: { getById: async (_tenantId, id) => ({ id }) } };
-  registerLibrary(server, services, async () => ({ tenant_id: tenantId, api_key_id: actorId }), {
-    rateLimiter: new FixedWindowLimiter(),
-    writePolicy: parseRateLimitConfig({}).write,
-  });
+  const services = {
+    ledgers: {
+      getById: async (_tenantId, id) => ({
+        id,
+        tenantId,
+        name: 'Cached',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    },
+  };
+  registerLibrary(
+    server,
+    services,
+    async () => ({ tenant_id: tenantId, api_key_id: actorId }),
+    {
+      rateLimiter: new FixedWindowLimiter(),
+      writePolicy: parseRateLimitConfig({}).write,
+    },
+    specification,
+  );
 
   try {
     const execute = async (ledgerId) => {

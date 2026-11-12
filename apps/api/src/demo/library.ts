@@ -1,345 +1,55 @@
-import { readFileSync } from 'node:fs';
-import { parse } from 'yaml';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ApplicationServices } from '@borecount/core/application';
-import * as http from '@borecount/http';
-import * as mappers from '@borecount/http/mappers';
-import {
-  libraryOperations,
-  operationDefinition,
-  toRestRequest,
-  toLibraryCall,
-  libraryArguments,
-} from '../../../../shared/library';
-import type {
-  LibraryCall,
-  LibraryOperation,
-  LibraryExecutionResponse,
-} from '../../../../shared/library-types';
-import type { JsonSchema, OpenApiDocument } from '../api/openapi-types';
-import type { OperationSchemas, ResultMapper, LibraryRateLimit } from './library-types';
+import { resolveLimit } from '@borecount/http/query/pagination';
+import { libraryOperations, libraryArguments } from '../../../../shared/library';
+import type { LibraryCall, LibraryExecutionResponse } from '../../../../shared/library-types';
+import type { OpenApiDocument } from '../api/openapi-types';
+import type { LibraryRateLimit, PreparedLibraryOperation } from './library-types';
 import type { SandboxIdentity } from './sandbox-types';
+import { RateLimitExceededError } from '../api/errors';
 import { LibraryInputError } from './library-input-error';
 import { isSameOrigin } from './same-origin';
-import { RateLimitExceededError } from '../api/errors';
+import { createLibraryRegistry } from './library-registry';
+import { buildLibraryInputSchema, parseLibraryFilter } from './library-validation';
 
-const specification = parse(
-  readFileSync(new URL('../../../../openapi/openapi.yaml', import.meta.url), 'utf8'),
-) as OpenApiDocument;
-
-function invalidInput(message: string, cause?: unknown): never {
-  throw new LibraryInputError(message, { cause });
-}
-
-function serializeForBrowser(value: unknown): unknown {
-  return JSON.parse(
-    JSON.stringify(value, (_key, child) => (typeof child === 'bigint' ? child.toString() : child)),
-  );
-}
-
-const filterFieldsByOperation: Record<string, http.FilterFields> = {
-  'ledgers.list': http.ledgerFilterFields,
-  'accounts.list': http.accountFilterFields,
-  'transactions.list': http.transactionFilterFields,
-  'transactions.listEntries': http.entryFilterFields,
-  'balances.listHistory': http.balanceHistoryFilterFields,
-  'holds.list': http.holdSummaryFilterFields,
-  'holds.listEntries': http.holdEntryFilterFields,
-  'holds.listCaptures': http.holdCaptureFilterFields,
-  'holds.listCreditAllocations': http.holdCreditAllocationFilterFields,
-  'creditGrants.list': http.creditGrantFilterFields,
-  'creditGrants.listLots': http.creditGrantFilterFields,
-  'creditGrants.listLineageByGrant': http.creditLineageFilterFields,
-  'creditGrants.listLineageByTransaction': http.creditLineageFilterFields,
-  'reconciliation.listRules': http.reconRuleFilterFields,
-  'reconciliation.listUploads': http.reconUploadListFilterFields,
-  'reconciliation.listRuns': http.reconRunListFilterFields,
-  'reconciliation.listResults': http.reconResultListFilterFields,
-};
-
-/** Expand local OpenAPI references so Fastify can compile each standalone input schema. */
-function resolveReferences<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(resolveReferences) as T;
-  if (!value || typeof value !== 'object') return value;
-
-  const object = value as Record<string, unknown>;
-  if (typeof object.$ref === 'string') {
-    const referenced = object.$ref
-      .slice(2)
-      .split('/')
-      .reduce<unknown>((parent, key) => (parent as Record<string, unknown>)[key], specification);
-    return resolveReferences(referenced) as T;
-  }
-
-  return Object.fromEntries(
-    Object.entries(object)
-      .filter(([key]) => key !== 'example' && key !== 'xml')
-      .map(([key, child]) => [key, resolveReferences(child)]),
-  ) as T;
-}
-
-function buildOperationSchemas(operation: LibraryOperation): OperationSchemas {
-  const canonicalPath = Object.keys(specification.paths).find(
-    (path) => path.replace(/\{[^}]+\}/g, ':id') === operation.path,
-  );
-  if (!canonicalPath) throw new Error(`Missing OpenAPI path for ${operation.operation}`);
-
-  const path = specification.paths[canonicalPath];
-  const route = operation.method === 'GET' ? path.get : path.post;
-  if (!route) throw new Error(`Missing OpenAPI operation for ${operation.operation}`);
-
-  const parameters = [...(path.parameters ?? []), ...(route.parameters ?? [])].map(
-    resolveReferences,
-  );
-  const queryProperties: Record<string, JsonSchema> = {};
-  const requiredQueryParameters: string[] = [];
-
-  for (const parameter of parameters) {
-    if (parameter.in !== 'query') continue;
-    // OpenAPI describes `where` as JSON content; the URL carries a bounded string.
-    // The public filter parser validates its fields and operators separately below.
-    queryProperties[parameter.name] = parameter.schema ?? { type: 'string', maxLength: 8192 };
-    if (parameter.required) requiredQueryParameters.push(parameter.name);
-  }
-
-  return {
-    body: route.requestBody
-      ? resolveReferences(route.requestBody.content['application/json'].schema)
-      : { type: 'object', additionalProperties: false, properties: {} },
-    query: {
-      type: 'object',
-      additionalProperties: false,
-      properties: queryProperties,
-      required: requiredQueryParameters,
-    },
-    // Fastify and AJV cache by schema identity. Keep the complete wrapper stable,
-    // not just the inner UUID schema, to avoid retaining a new validator per request.
-    resourceId: operation.parameter
-      ? {
-          type: 'object',
-          required: ['id'],
-          properties: {
-            id: parameters.find((parameter) => parameter.in === 'path')?.schema ?? {
-              type: 'string',
-              format: 'uuid',
-            },
-          },
-        }
-      : undefined,
-  };
-}
-
-// Reuse released input constraints without invoking the HTTP adapter or duplicating its rules.
-const schemasByOperation = new Map(
-  libraryOperations.map((operation) => [operation.operation, buildOperationSchemas(operation)]),
-);
-
-const pageItemMappers: Record<string, ResultMapper> = {
-  'accounts.list': mappers.toAccountResponse,
-  'transactions.list': mappers.toTransactionResponse,
-  'transactions.listEntries': mappers.toEntryResponse,
-  'holds.list': mappers.toHoldSummaryResponse,
-  'holds.listEntries': mappers.toHoldEntryResponse,
-  'holds.listCaptures': mappers.toHoldCaptureResponse,
-  'holds.listCreditAllocations': mappers.toHoldCreditAllocationResponse,
-  'creditGrants.list': mappers.toCreditGrantResponse,
-  'creditGrants.listLots': mappers.toCreditGrantLotResponse,
-  'creditGrants.listLineageByGrant': mappers.toCreditGrantLineageItemResponse,
-  'creditGrants.listLineageByTransaction': mappers.toCreditGrantLineageItemResponse,
-  'reconciliation.listRules': mappers.toReconRuleResponse,
-  'reconciliation.listUploads': mappers.toReconUploadResponse,
-  'reconciliation.listRuns': mappers.toReconRunSummaryResponse,
-  'reconciliation.listRecords': mappers.toReconRecordResponse,
-  'reconciliation.listResults': mappers.toReconResultResponse,
-};
-
-const resultMappers: Record<string, ResultMapper> = {
-  'accounts.create': mappers.toAccountResponse,
-  'accounts.getById': mappers.toAccountResponse,
-  'transactions.getById': mappers.toTransactionResponse,
-  'holds.getById': mappers.toHoldSummaryResponse,
-  'balances.getTrialBalance': mappers.toTrialBalanceResponse,
-  'statements.getAccountStatement': mappers.toAccountStatementResponse,
-  'statements.getCreditLotStatement': mappers.toCreditLotStatementResponse,
-  'creditGrants.getById': mappers.toCreditGrantResponse,
-  'creditGrants.getBalance': mappers.toCreditBalanceResponse,
-  'creditGrants.refund': mappers.toRefundCreditGrantResponse,
-  'creditGrants.previewExpirations': mappers.toCreditGrantExpirationResponse,
-  'creditGrants.runExpirations': mappers.toCreditGrantExpirationResponse,
-  'adjustments.credit': mappers.toAdjustmentResponse,
-  'adjustments.debit': mappers.toAdjustmentResponse,
-  'reconciliation.createRule': mappers.toReconRuleResponse,
-  'reconciliation.ingest': mappers.toReconUploadResponse,
-  'reconciliation.getUpload': mappers.toReconUploadResponse,
-  'reconciliation.run': mappers.toReconRunResponse,
-  'reconciliation.getRun': mappers.toReconRunResponse,
-};
-
-/** Used only for structural result fields; metadata-bearing entities use public mappers. */
-function structuralResultToSnakeCase(value: unknown): unknown {
-  if (value instanceof Date || typeof value !== 'object' || value === null) return value;
-  if (Array.isArray(value)) return value.map(structuralResultToSnakeCase);
-
-  return Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [
-      key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-      structuralResultToSnakeCase(child),
-    ]),
-  );
-}
-
-function toDisplayResult(operation: string, value: unknown): unknown {
-  const pageMapper = pageItemMappers[operation];
-  if (pageMapper || operation === 'ledgers.list') {
-    const page = value as { data: unknown[]; nextCursor: string | null };
-    return {
-      data: pageMapper ? page.data.map((item) => pageMapper(item as never)) : page.data,
-      next_cursor: page.nextCursor,
-    };
-  }
-
-  const resultMapper = resultMappers[operation];
-  if (resultMapper) return resultMapper(value as never);
-
-  switch (operation) {
-    case 'ledgers.create':
-    case 'ledgers.getById':
-      return value;
-    case 'creditGrants.create':
-    case 'creditGrants.reverse': {
-      const result = value as Awaited<ReturnType<ApplicationServices['creditGrants']['create']>>;
-      return mappers.toCreditGrantResponse(result.grant);
-    }
-    case 'balances.getAt': {
-      const balance = value as Awaited<ReturnType<ApplicationServices['balances']['getAt']>>;
-      return {
-        account_id: balance.accountId,
-        timestamp: balance.at,
-        posted_minor: balance.postedMinor,
-        reserved_delta_minor: balance.reservedDeltaMinor,
-        available_minor: balance.availableMinor,
-      };
-    }
-    default:
-      return structuralResultToSnakeCase(value);
-  }
-}
-
-const authorityFields = new Set([
-  'tenantId',
-  'tenant_id',
-  'actorId',
-  'actor_id',
-  '__proto__',
-  'constructor',
-  'prototype',
-]);
-const opaqueDataFields = new Set(['metadata', 'raw', 'attributes']);
-
-function containsAuthorityOverride(input: unknown): boolean {
-  if (Array.isArray(input)) return input.some(containsAuthorityOverride);
-  if (!input || typeof input !== 'object') return false;
-
-  return Object.entries(input).some(
-    ([key, value]) =>
-      authorityFields.has(key) ||
-      // Arbitrary business metadata may contain these names without granting authority.
-      (!opaqueDataFields.has(key) && containsAuthorityOverride(value)),
-  );
-}
-
-function sortObjectKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortObjectKeys);
-  if (!value || typeof value !== 'object') return value;
-
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, sortObjectKeys((value as Record<string, unknown>)[key])]),
-  );
-}
-
-function validateSchema(request: FastifyRequest, schema: JsonSchema, value: unknown): void {
-  if (!request.compileValidationSchema(schema)(value)) invalidInput('Invalid library arguments');
-}
-
-function prepareServiceArguments(
-  request: FastifyRequest,
+function prepareArguments(
   call: LibraryCall,
-  operation: LibraryOperation,
+  operation: PreparedLibraryOperation,
   identity: SandboxIdentity,
 ): unknown[] {
-  if (containsAuthorityOverride(call.input)) {
-    invalidInput('Tenant and actor are supplied by the authenticated sandbox');
+  // AJV may coerce/default fields. Keep those changes separate from the submitted
+  // JSON so validation never mutates journal/replay data supplied by the caller.
+  const input = structuredClone(call.input);
+  if (!operation.validate?.(input)) {
+    throw new LibraryInputError('Invalid library arguments', { cause: operation.validate?.errors });
   }
 
-  let restRequest;
-  try {
-    restRequest = toRestRequest(call);
-  } catch (cause) {
-    return invalidInput('Invalid library arguments', cause);
+  const fields = operation.implementation.filterFields;
+  let where: unknown;
+  if (fields && input.where !== undefined) {
+    where = parseLibraryFilter(input.where, fields);
+    if (where === null) throw new LibraryInputError('Invalid filter');
   }
 
-  const url = new URL(restRequest.path, 'http://demo.invalid');
-  const schemas = schemasByOperation.get(call.operation)!;
-  if (operation.parameter) {
-    validateSchema(request, schemas.resourceId!, { id: call.input[operation.parameter] });
-  }
-
-  if (restRequest.method === 'POST') {
-    if (call.operation.startsWith('adjustments.')) {
-      restRequest.body!.actor_id = identity.api_key_id;
-    }
-    validateSchema(request, schemas.body, restRequest.body);
-  } else {
-    validateSchema(request, schemas.query, Object.fromEntries(url.searchParams));
-  }
-
-  // Reject misspelled or snake_case arguments instead of silently dropping them in conversion.
-  const canonicalInput = toLibraryCall(restRequest).input;
-  if (
-    JSON.stringify(sortObjectKeys(canonicalInput)) !== JSON.stringify(sortObjectKeys(call.input))
-  ) {
-    invalidInput('Use the displayed camelCase library arguments');
-  }
-
-  const filterFields = filterFieldsByOperation[call.operation];
-  let parsedWhere: unknown;
-  if (filterFields && call.input.where !== undefined) {
-    parsedWhere = http.readWhereParameter(url.pathname + url.search, filterFields);
-    if (parsedWhere === null) invalidInput('Invalid filter');
-  }
-
-  // Validate filters before bigint/date conversion: invalid editor input is a 400, not a 500.
   let args: unknown[];
   try {
-    args = libraryArguments(call, identity.tenant_id, identity.api_key_id);
+    args = libraryArguments(
+      { operation: call.operation, input },
+      identity.tenant_id,
+      identity.api_key_id,
+    );
   } catch (cause) {
-    return invalidInput('Invalid typed library arguments', cause);
+    throw new LibraryInputError('Invalid typed library arguments', { cause });
   }
 
-  if (!operation.positional) {
-    const input = args[0] as Record<string, unknown>;
-    if (filterFields && call.input.where !== undefined) input.where = parsedWhere;
-    if (operation.method === 'GET' && schemas.query.properties.limit && input.limit === undefined) {
-      input.limit = 50;
+  if (!operation.metadata.positional) {
+    const argument = args[0] as Record<string, unknown>;
+    if (fields && input.where !== undefined) argument.where = where;
+    if (operation.metadata.method === 'GET' && operation.schema.properties.limit) {
+      argument.limit = resolveLimit(argument.limit as number | undefined);
     }
   }
   return args;
-}
-
-async function invokeService(
-  services: ApplicationServices,
-  operation: string,
-  args: unknown[],
-): Promise<unknown> {
-  // Only names in libraryOperations reach this boundary; no caller-selected property dispatch.
-  const [serviceName, methodName] = operation.split('.');
-  const service = services[serviceName as keyof ApplicationServices];
-  const method = (service as unknown as Record<string, (...args: never[]) => Promise<unknown>>)[
-    methodName
-  ];
-  return method.apply(service, args as never[]);
 }
 
 export function registerLibrary(
@@ -347,7 +57,37 @@ export function registerLibrary(
   services: ApplicationServices,
   resolveSession: (request: FastifyRequest) => Promise<SandboxIdentity>,
   { rateLimiter, writePolicy }: LibraryRateLimit,
+  specification: OpenApiDocument,
 ): void {
+  const registry = createLibraryRegistry(services);
+  const operations = new Map<string, PreparedLibraryOperation>(
+    libraryOperations.map((metadata) => {
+      const implementation = registry[metadata.operation];
+      return [
+        metadata.operation,
+        {
+          metadata,
+          implementation,
+          schema: buildLibraryInputSchema(specification, metadata, implementation.filterFields),
+        },
+      ];
+    }),
+  );
+
+  // Route registration initializes Fastify's compiler. Compile each complete
+  // schema once before accepting traffic; requests never allocate validators.
+  server.addHook('onReady', async () => {
+    if (!server.validatorCompiler) throw new Error('Library validation compiler is unavailable');
+    for (const operation of operations.values()) {
+      operation.validate = server.validatorCompiler({
+        schema: operation.schema,
+        method: 'POST',
+        url: '/demo/library/execute',
+        httpPart: 'body',
+      });
+    }
+  });
+
   server.post<{ Body: LibraryCall }>(
     '/demo/library/execute',
     {
@@ -358,7 +98,7 @@ export function registerLibrary(
           additionalProperties: false,
           required: ['operation', 'input'],
           properties: {
-            operation: { type: 'string', enum: libraryOperations.map((item) => item.operation) },
+            operation: { type: 'string', enum: [...operations.keys()] },
             input: { type: 'object', additionalProperties: true },
           },
         },
@@ -367,41 +107,45 @@ export function registerLibrary(
     async (request, reply) => {
       reply.header('cache-control', 'no-store');
       if (!isSameOrigin(request)) {
-        return reply.code(403).send({
-          error: 'FORBIDDEN',
-          message: 'Same-origin library execution required',
-        });
+        return reply
+          .code(403)
+          .send({ error: 'FORBIDDEN', message: 'Same-origin library execution required' });
       }
 
-      // This route sits outside /v1, so it must enforce session and quota checks itself.
       const identity = await resolveSession(request);
       request.tenantId = identity.tenant_id;
       request.apiKeyId = identity.api_key_id;
       const call = request.body;
-      const operation = operationDefinition(call.operation);
-      // A Library read uses POST for transport but does not spend the write
-      // allowance. Mutations share the same per-IP bucket as REST writes.
-      if (operation.method === 'POST') {
+      const operation = operations.get(call.operation)!;
+      // POST is only the bridge transport. Reads do not consume write quota;
+      // mutations share the REST per-IP bucket and configured allowance.
+      if (operation.metadata.method === 'POST') {
         const quota = rateLimiter.consume(`write:${request.ip}`, writePolicy);
         if (!quota.allowed) throw new RateLimitExceededError(quota.retryAfterSeconds);
       }
-      const args = prepareServiceArguments(request, call, operation, identity);
-      const value = await invokeService(services, call.operation, args);
-      const executedInput = operation.positional
-        ? { ...call.input, tenantId: identity.tenant_id }
-        : args[0];
 
-      // Existing panels consume the REST-shaped display result. The journal gets the native
-      // library value and actual trusted arguments, with only bigint/Date serialization applied.
+      const args = prepareArguments(call, operation, identity);
+      const { value, result } = await operation.implementation.execute(args);
+      // Positional readers are displayed with names, but every logged value comes
+      // from the same argument tuple supplied to the service, never reconstructed input.
+      const executedInput = operation.metadata.positional
+        ? { tenantId: args[0], [operation.metadata.parameter!]: args[1] }
+        : args[0];
       const response: LibraryExecutionResponse = {
-        result: serializeForBrowser(toDisplayResult(call.operation, value)),
-        value: serializeForBrowser(value),
-        call: {
-          operation: call.operation,
-          input: serializeForBrowser(executedInput) as LibraryCall['input'],
-        },
+        result,
+        value,
+        call: { operation: call.operation, input: executedInput as LibraryCall['input'] },
       };
-      return response;
+
+      // Preserve the native journal value and normalized panel result as distinct
+      // views. Serialize the whole envelope once, including bigint and Date values.
+      return reply
+        .type('application/json')
+        .send(
+          JSON.stringify(response, (_key, child) =>
+            typeof child === 'bigint' ? child.toString() : child,
+          ),
+        );
     },
   );
 }

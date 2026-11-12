@@ -30,7 +30,10 @@ const TOKEN_ENDPOINT = '/v1/auth/token';
 const V1_ROUTE_PREFIX = '/v1/';
 const OPENAPI_SPEC_PATH = fileURLToPath(new URL('../../../../openapi/openapi.yaml', import.meta.url));
 const OPENAPI_SPEC_CONTENT = readFileSync(OPENAPI_SPEC_PATH, 'utf8');
-const SWAGGER_SPEC = parseYaml(OPENAPI_SPEC_CONTENT) as OpenApiDocument;
+// Validation and documentation share the parsed canonical document. Swagger's
+// presentation tags and server URL belong to a separate copy.
+export const canonicalOpenApi = parseYaml(OPENAPI_SPEC_CONTENT) as OpenApiDocument;
+const SWAGGER_SPEC = structuredClone(canonicalOpenApi);
 // Presentation-only grouping and same-origin server URL. The downloadable YAML stays canonical.
 SWAGGER_SPEC.servers = [{ url: '/' }];
 const ROUTE_TAGS: Record<string, string> = { ledgers: 'Ledgers', accounts: 'Accounts', transactions: 'Transactions',

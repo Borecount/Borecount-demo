@@ -8,7 +8,7 @@ import { createUnitOfWork, type DbClient } from '@borecount/postgres-adapter';
 import { demoSessions } from './schema';
 import { registerLibrary } from './library';
 import type { SandboxSession } from './sandbox-types';
-import type { LibraryRateLimit } from './library-types';
+import type { LibraryBridgeOptions } from './library-types';
 import { isSameOrigin } from './same-origin';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
 import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
@@ -24,7 +24,7 @@ const hash = (value: string) => createHash('sha256').update(value, 'utf8').diges
 const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split(';')
   .map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 
-export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryRateLimit: LibraryRateLimit) {
+export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryOptions: LibraryBridgeOptions) {
   const limiter = new FixedWindowLimiter();
   const unitOfWork = createUnitOfWork(db);
   const session = async (request: FastifyRequest): Promise<SandboxSession> => {
@@ -36,7 +36,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     if (!row) throw new UnauthorizedError('Demo session expired. Start a new sandbox.');
     return row;
   };
-  registerLibrary(server, services, session, libraryRateLimit);
+  registerLibrary(server, services, session, libraryOptions, libraryOptions.specification);
   const payload = async (row: SandboxSession) => ({
     access_token: issueAccessToken({ tenantId: row.tenant_id, apiKeyId: row.api_key_id, role: ApiKeyRole.SERVICE }, jwt),
     expires_in: jwt.accessTokenTtlSeconds,

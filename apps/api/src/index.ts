@@ -1,7 +1,7 @@
 import { parseJwtAuthConfig } from '@api/auth/policy';
 import { parseRateLimitConfig } from '@api/rate-limit/policy';
 import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
-import { createServerCore, registerApplication } from '@api/server';
+import { canonicalOpenApi, createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
 import { isMainModule } from './utils/is-main-module';
 import { ApiKeyRole } from '@borecount/core/application';
@@ -65,6 +65,7 @@ export const run = async (): Promise<void> => {
   registerSandbox(server, dbClient, services, jwtAuth, {
     rateLimiter,
     writePolicy: rateLimit.write,
+    specification: canonicalOpenApi,
   });
   const port = parsePort(process.env.PORT);
   const shutdownTimeoutMs = parseShutdownTimeout(process.env.SHUTDOWN_TIMEOUT_MS);
