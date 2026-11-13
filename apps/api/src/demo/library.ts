@@ -1,13 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ApplicationServices } from '@borecount/core/application';
+import { ForbiddenError } from '@borecount/core/errors';
 import { resolveLimit } from '@borecount/http/query/pagination';
 import { libraryOperations, libraryArguments } from '../../../../shared/library';
 import type { LibraryCall, LibraryExecutionResponse } from '../../../../shared/library-types';
 import type { OpenApiDocument } from '../api/openapi-types';
 import type { LibraryRateLimit, PreparedLibraryOperation } from './library-types';
 import type { SandboxIdentity } from './sandbox-types';
-import { RateLimitExceededError } from '../api/errors';
-import { LibraryInputError } from './library-input-error';
+import { protectReports } from '../api/resource-protection/host-protection';
+import { HostInputError } from '../api/errors/host-input-error';
 import { isSameOrigin } from './same-origin';
 import { createLibraryRegistry } from './library-registry';
 import { buildLibraryInputSchema, parseLibraryFilter } from './library-validation';
@@ -23,20 +24,20 @@ function validate(
   operation: PreparedLibraryOperation,
 ): ValidatedLibraryInput {
   if (call.operation !== operation.metadata.operation) {
-    throw new LibraryInputError('Library operation does not match input schema');
+    throw new HostInputError('Library operation does not match input schema');
   }
   // AJV may coerce/default fields. Keep those changes separate from the submitted
   // JSON so validation never mutates journal/replay data supplied by the caller.
   const input = structuredClone(call.input);
   if (!operation.validate?.(input)) {
-    throw new LibraryInputError('Invalid library arguments', { cause: operation.validate?.errors });
+    throw new HostInputError('Invalid library arguments', { cause: operation.validate?.errors });
   }
 
   const fields = operation.implementation.filterFields;
   let where: unknown;
   if (fields && input.where !== undefined) {
     where = parseLibraryFilter(input.where, fields);
-    if (where === null) throw new LibraryInputError('Invalid filter');
+    if (where === null) throw new HostInputError('Invalid filter');
   }
 
   return { operation, input, where };
@@ -57,7 +58,7 @@ function buildArgs(
       identity.api_key_id,
     );
   } catch (cause) {
-    throw new LibraryInputError('Invalid typed library arguments', { cause });
+    throw new HostInputError('Invalid typed library arguments', { cause });
   }
 
   if (!operation.metadata.positional) {
@@ -74,10 +75,10 @@ export function registerLibrary(
   server: FastifyInstance,
   services: ApplicationServices,
   resolveSession: (request: FastifyRequest) => Promise<SandboxIdentity>,
-  { rateLimiter, writePolicy }: LibraryRateLimit,
+  { protection }: LibraryRateLimit,
   specification: OpenApiDocument,
 ): void {
-  const registry = createLibraryRegistry(services);
+  const registry = createLibraryRegistry(protectReports(services, protection));
   const operations = new Map<string, PreparedLibraryOperation>(
     libraryOperations.map((metadata) => {
       const implementation = registry[metadata.operation];
@@ -109,7 +110,13 @@ export function registerLibrary(
   server.post<{ Body: LibraryCall }>(
     '/demo/library/execute',
     {
-      bodyLimit: 1024 * 1024,
+      bodyLimit: protection.config.bodyBytes,
+      onRequest: async (request) => {
+        if (!isSameOrigin(request)) throw new ForbiddenError('Same-origin library execution required');
+        const identity = await resolveSession(request);
+        request.tenantId = identity.tenant_id;
+        request.apiKeyId = identity.api_key_id;
+      },
       schema: {
         body: {
           type: 'object',
@@ -124,26 +131,13 @@ export function registerLibrary(
     },
     async (request, reply) => {
       reply.header('cache-control', 'no-store');
-      if (!isSameOrigin(request)) {
-        return reply
-          .code(403)
-          .send({ error: 'FORBIDDEN', message: 'Same-origin library execution required' });
-      }
-
-      const identity = await resolveSession(request);
-      request.tenantId = identity.tenant_id;
-      request.apiKeyId = identity.api_key_id;
+      const identity: SandboxIdentity = { tenant_id: request.tenantId!, api_key_id: request.apiKeyId! };
       const call = request.body;
       const operation = operations.get(call.operation)!;
-      // POST is only the bridge transport. Reads do not consume write quota;
-      // mutations share the REST per-IP bucket and configured allowance.
-      if (operation.metadata.method === 'POST') {
-        const quota = rateLimiter.consume(`write:${request.ip}`, writePolicy);
-        if (!quota.allowed) throw new RateLimitExceededError(quota.retryAfterSeconds);
-      }
-
+      if (operation.metadata.path === '/v1/transactions/bulk') protection.validateBulk(call.input);
       const validated = validate(call, operation);
       const args = buildArgs(validated, identity);
+      protection.account(identity.tenant_id, operation.metadata.method === 'POST');
       const { value, result } = await operation.implementation.execute(args);
       // Positional readers are displayed with names, but every logged value comes
       // from the same argument tuple supplied to the service, never reconstructed input.

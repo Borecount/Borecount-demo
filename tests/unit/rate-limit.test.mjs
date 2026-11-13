@@ -10,6 +10,8 @@ const [
   { registerLibrary },
   { FixedWindowLimiter },
   { issueAccessToken },
+  { HostProtection },
+  { parseRateLimitConfig },
 ] = await Promise.all([
   tsImport('../../apps/api/src/api/server.ts', {
     parentURL: import.meta.url,
@@ -18,6 +20,8 @@ const [
   tsImport('../../apps/api/src/demo/library.ts', import.meta.url),
   tsImport('../../apps/api/src/api/rate-limit/fixed-window-limiter.ts', import.meta.url),
   tsImport('../../apps/api/src/api/auth/jwt.ts', import.meta.url),
+  tsImport('../../apps/api/src/api/resource-protection/host-protection.ts', { parentURL: import.meta.url, tsconfig: apiTsconfig }),
+  tsImport('../../apps/api/src/api/rate-limit/policy.ts', import.meta.url),
 ]);
 
 test('REST and Library writes share a quota while Library reads do not consume it', async () => {
@@ -33,6 +37,8 @@ test('REST and Library writes share a quota while Library reads do not consume i
   };
   const writePolicy = { maxRequests: 2, windowSeconds: 60 };
   const rateLimiter = new FixedWindowLimiter();
+  const rateLimit = { ...parseRateLimitConfig({}), write: writePolicy };
+  const protection = new HostProtection(rateLimit, rateLimiter);
   const ledger = (name) => ({
     id:
       name === 'REST write'
@@ -75,18 +81,14 @@ test('REST and Library writes share a quota while Library reads do not consume i
   registerApplication(server, {
     services,
     jwtAuth,
-    rateLimit: {
-      authToken: { maxRequests: 2, windowSeconds: 60 },
-      write: writePolicy,
-    },
-    rateLimiter,
+    protection,
     authorizeAdjustment: false,
   });
   registerLibrary(
     server,
     services,
     async () => ({ tenant_id: tenantId, api_key_id: apiKeyId }),
-    { rateLimiter, writePolicy },
+    { protection },
     canonicalOpenApi,
   );
 
@@ -126,7 +128,7 @@ test('REST and Library writes share a quota while Library reads do not consume i
     });
     assert.equal(libraryWrite.statusCode, 200, libraryWrite.body);
 
-    // A third write is rejected because both preceding writes used one shared IP bucket.
+    // A third write is rejected because both preceding writes used one shared tenant bucket.
     const limitedRestWrite = await server.inject({
       method: 'POST',
       url: '/v1/ledgers',

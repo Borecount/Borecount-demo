@@ -19,10 +19,19 @@ The demo reads process environment directly. Node forbids `--env-file` in `NODE_
 | `JWT_ISSUER` | `borecount-api` | Issuer written to and required from access tokens. |
 | `JWT_ACCESS_TTL_SECONDS` | `900` | Integer 300–900; the supported/documented demo profile is exactly `900`. |
 | `JWT_CLOCK_SKEW_SECONDS` | `5` | Integer 0–60 used for `iat`/`exp` verification. |
-| `RATE_LIMIT_AUTH_TOKEN_MAX_REQUESTS` | `20` | Positive integer token-exchange requests per source IP/window/process. |
-| `RATE_LIMIT_AUTH_TOKEN_WINDOW_SECONDS` | `60` | Positive integer fixed-window size. |
-| `RATE_LIMIT_WRITE_MAX_REQUESTS` | `120` | Positive integer REST `POST /v1/*` and mutating Library bridge calls per source IP/window/process, excluding separate token policy. |
-| `RATE_LIMIT_WRITE_WINDOW_SECONDS` | `60` | Positive integer fixed-window size. |
+| `RATE_LIMIT_AUTH_TOKEN_MAX_REQUESTS` | `20` | Integer 1–1000000 token-exchange attempts per source IP/window/process. |
+| `RATE_LIMIT_AUTH_TOKEN_WINDOW_SECONDS` | `60` | Integer 1–86400; fixed-window size in seconds. |
+| `RATE_LIMIT_WRITE_MAX_REQUESTS` | `120` | Integer 1–1000000 REST mutations and mutating Library calls per authenticated tenant/window/process. |
+| `RATE_LIMIT_WRITE_WINDOW_SECONDS` | `60` | Integer 1–86400; fixed-window size in seconds. |
+| `RATE_LIMIT_READ_MAX_REQUESTS` / `RATE_LIMIT_READ_WINDOW_SECONDS` | `600` / `60` | Authenticated reads per tenant/window, including Library reads and session refresh. Same count/window ranges as write policy. |
+| `RATE_LIMIT_ABUSE_MAX_REQUESTS` / `RATE_LIMIT_ABUSE_WINDOW_SECONDS` | `1200` / `60` | All `/v1/*`, `/demo/session`, and Library execute attempts per source IP before authentication/body parsing. Includes successful requests; separate from tenant budgets. |
+| `RATE_LIMIT_SESSION_MAX_REQUESTS` / `RATE_LIMIT_SESSION_WINDOW_SECONDS` | `20` / `3600` | Same-origin sandbox creation attempts per source IP/window. |
+| `RATE_LIMIT_MAX_KEYS` | `10000` | Integer 1–100000; maximum keys in **each** of four independent stores: abuse, token, session, tenant read/write. |
+| `REQUEST_BODY_MAX_BYTES` | `1048576` | Integer 1–16777216; decoded request-body bytes for REST, Library bridge and session endpoints. Oversize returns 413. |
+| `REQUEST_BULK_MAX_ITEMS` | `100` | Integer 1–100; host cap on transaction bulk items in both modes, before dispatch. May tighten, never raise the canonical maximum of 100. Oversize count returns 400. |
+| `REPORT_CONCURRENCY_MAX` | `4` | Integer 1–1000; total in-flight reporting service calls/process. No queue. |
+| `REPORT_TENANT_CONCURRENCY_MAX` | `2` | Integer 1–1000, at most global cap; report calls per authenticated tenant. |
+| `TRUSTED_PROXY_CIDRS` | Empty | Comma-separated explicit ingress IPs/CIDRs, IPv4/IPv6; no wildcard, boolean, hop-count or `/0`. Empty ignores forwarded IP/protocol. |
 | `BOOTSTRAP_TENANT_NAME` | **Optional bootstrap utility only** | Initial tenant display name for manually creating an initial ADMIN key. |
 | `BOOTSTRAP_ADMIN_KEY_NAME` | `Initial admin key` | Initial key display name when using the optional bootstrap utility. |
 | `BOOTSTRAP_ADMIN_API_KEY` | **Optional bootstrap utility only** | Generated initial admin key (`llk_` followed by 64 lowercase hex digits). Secret; not needed to run the demo or create private sandbox sessions. |
@@ -31,13 +40,35 @@ Unknown variables are ignored. Configuration is validated at process startup; in
 
 ## Rate limits
 
-The token endpoint and write endpoints use separate in-memory, fixed-window policies keyed by client IP. REST `POST /v1/*` requests share the write quota with mutating Library calls to `/demo/library/execute`; Library reads do not use the write quota even though the bridge uses HTTP `POST`. A rejected call returns `429`, `Retry-After`, and:
+All resource controls are free host policy, without commercial entitlements. A bounded IP abuse budget runs before authentication and body parsing for REST, session refresh/creation and Library execution. Token exchange and sandbox creation also have separate IP budgets. Tenant accounting follows credential verification (including backing-key revocation and sandbox expiry); caller-supplied tenant headers and resource IDs never choose a bucket.
+
+REST reads and Library reads share the authenticated tenant's read budget. REST mutations and Library mutations share its write budget, regardless of source IP or credentials within that tenant. Library HTTP POST is a transport: the allowlisted operation determines read/write classification. REST non-GET/HEAD routes count as writes, including preview operations. Invalid authentication does not consume tenant budgets. Valid REST and Library inputs are accounted before service dispatch. Schema/parser/argument rejections remain covered by the pre-auth budget.
+
+A rejected quota, full key store or report-concurrency request returns `429`, `Retry-After`, and:
 
 ```json
 {"error":"RATE_LIMIT_EXCEEDED","message":"Rate limit exceeded","retry_after_seconds":42}
 ```
 
-HTTP `GET` requests are not limited by the REST write quota. The separate `POST /demo/session` creation limit is 20 requests per source IP per hour per process. Counters are neither shared nor persisted, so limits reset on restart and multiply with replica count. Production deployments should use a trusted proxy configuration and shared ingress/gateway limiter; the demo does not process forwarded-IP trust explicitly.
+The delay is rounded up to whole seconds until the fixed window ends. Windows start with the first accepted attempt, and rejected attempts do not extend them. Concurrency rejection uses a one-second backoff hint, not a prediction of completion. All 5xx responses are sanitized; validation/body-size errors use governed 400/413 envelopes.
+
+Each limiter store has a hard key cap. Expired buckets are reclaimed lazily (at most one full sweep/second; a requested expired key is reclaimed immediately); active buckets are never evicted to admit new identities. At capacity, new keys fail closed until expired keys are swept (up to one additional second). Existing keys keep their counters. Key lengths are bounded to 256 characters and secrets/URLs are never used as keys. Separate abuse/token/session stores prevent unauthenticated key churn from evicting tenant counters. Idle expired keys can remain until the next request, but storage remains bounded. In-flight report state is deleted in `finally`, after awaited service work completes, including failures; client disconnects cannot free a still-running query's permit.
+
+Concurrency protection covers `balances.getAt`, `balances.listHistory`, `balances.getTrialBalance`, `statements.getAccountStatement` and `statements.getCreditLotStatement`, through both REST and Library. It does not create a tenant-export API or a consistent multi-request snapshot. Full tenant export/restore remains LL-137; other expensive operations (notably reconciliation/seeding) currently have rate/body/DB-pool controls, not a dedicated concurrency queue. Transaction/hold entry counts, normalized reconciliation record counts and matching-rule ID counts have no independent host count knobs; their payloads remain bounded by the body-byte cap and canonical validation. The public DB client supports pool/connect/idle knobs above, but no host statement/query execution deadline; configure PostgreSQL `statement_timeout`/`lock_timeout` through the operator-owned database role/session policy and size them for real workloads. Do not use HTTP timeouts as proof that database work has stopped.
+
+### Sizing and topology
+
+This is a **single-process** example: counters and permits are neither persisted nor shared; restarting resets them, and replicas multiply allowances. Distributed coordination, ingress connection/body limits, capacity monitoring and shared limits are operator responsibilities. A shared source IP can exhaust the pre-auth budget even when tenant budgets are isolated. Per-tenant report caps reduce noisy-neighbor impact but global pool/CPU/report capacity remains shared; this is not a fairness or availability guarantee under saturation.
+
+Start with the defaults, then measure peak requests, query duration, memory and PostgreSQL capacity. Keep the global report cap below pool capacity (default 4 versus 10), leaving connections for auth, mutations and readiness. Budget the sum of pools across processes, migrations and operator tools against database `max_connections`. Set per-tenant limits below aggregate service capacity, choose body/bulk limits from payload memory and transaction latency, and size key caps for active tenants/IPs across the longest window. Separate stores allow up to four times `RATE_LIMIT_MAX_KEYS` buckets; each tenant can use two read/write keys. These defaults are a starting profile, not load-test evidence for a particular host.
+
+### Trusted ingress
+
+By default forwarded IP/protocol headers are ignored and visitors behind nginx share its abuse/token/session buckets. To distinguish visitors, set `TRUSTED_PROXY_CIDRS` to the **actual immediate nginx peer IP or narrow dedicated network**, and keep the API port private. The Render sidecar can use `127.0.0.1/32`; Compose requires the deployed nginx peer/network, not a guessed public client range. Do not allowlist networks containing untrusted callers.
+
+Bundled nginx overwrites `X-Forwarded-For` with `$remote_addr` and `X-Forwarded-Proto` with `$scheme`, dropping caller-selected chains. If another load balancer terminates HTTPS first, configure and verify nginx's real-IP/HTTPS handling with that explicitly trusted upstream; do not blindly restore incoming forwarding headers. Fastify trusts forwarding information only from allowlisted peers. Production sandbox cookies are always Secure; local non-production HTTP cookies become Secure only when the trusted request protocol is HTTPS.
+
+Run `npm run test:unit` for bounded, clock-controlled window recovery, capacity/key-churn, concurrent mixed-mode requests, tenant/noisy-neighbor, proxy-spoof and captured-log privacy checks. `npm run test:integration` verifies real PostgreSQL atomicity/retries/isolation plus rejection and retry recovery with the composed host. These are local tests, not deployed ingress or multi-instance verification.
 
 ## Health, readiness, and metrics
 
@@ -51,7 +82,7 @@ HTTP `GET` requests are not limited by the REST write quota. The separate `POST 
 
 Metrics include request totals and duration histograms labeled by route/status, authentication failures, and token-issuance failures. The registry is process-local and resets on restart. These endpoints are unauthenticated; restrict them at the network/ingress layer when needed.
 
-Logs are structured JSON and include request ID, tenant/key IDs when authenticated, route, method, status, and duration. Secret values and JWTs are not intentionally logged.
+Logs are structured JSON and include request ID, tenant/key IDs when authenticated, route, method, status, and duration. Request IDs accept only 1–64 ASCII letters, digits, `_` and `-`; invalid values are replaced with generated UUIDs. Logs use route templates (unmatched paths use `/unmatched`), never query strings, bodies, headers, SQL, raw errors or cause/stack chains. Each 5xx has a correlated safe error event, including adapter-mapped and readiness failures. Error serializers and header redaction provide an additional boundary. Bundled nginx emits only generated request ID, status and duration; its native raw error log is disabled because it can embed request URLs. Operators needing ingress diagnostics must supply a separately reviewed sanitizing collector. External platform/load-balancer logs are outside this application boundary and require their own privacy policy.
 
 ## Graceful shutdown
 
@@ -88,7 +119,7 @@ The 0.8.0 migration chain starts with the squashed upstream baseline. Recreate d
 
 This is an integration demo and reusable financial-core composition, not a hosted or managed accounting product. In particular:
 
-- no TLS termination, WAF, CORS policy, shared rate limiter, or trusted-proxy setup;
+- no TLS termination, WAF, CORS policy or shared/distributed rate limiter; operators configure the explicit trusted-proxy allowlist;
 - no built-in secret manager or automated signing-key rotation;
 - no PostgreSQL HA, backups, disaster recovery, external pooler, or capacity tuning;
 - no distributed traces, alert rules, dashboards, audit export, or log retention policy;
@@ -111,9 +142,9 @@ the demo without claiming production SaaS readiness.
 
 ## Private sandbox lifecycle
 
-`POST /demo/session` provisions a private tenant with USD/EUR assets, ledgers, demo accounts, and opening transactions through the public application services, then returns a short-lived SERVICE bearer. A random 256-bit session credential is set as an HttpOnly, SameSite=Strict cookie; only its SHA-256 hash is persisted as host session metadata. TLS ingress supplies `X-Forwarded-Proto: https` so the cookie is Secure. No raw library API key is exposed. `GET /demo/session` refreshes the bearer until the fixed eight-hour session boundary; the API rejects sandbox bearer use after that boundary as well.
+`POST /demo/session` provisions a private tenant with USD/EUR assets, ledgers, demo accounts, and opening transactions through the public application services, then returns a short-lived SERVICE bearer. A random 256-bit session credential is set as an HttpOnly, SameSite=Strict cookie; only its SHA-256 hash is persisted as host session metadata. Production cookies are always Secure; HTTPS/access control remain ingress responsibilities. No raw library API key is exposed. `GET /demo/session` refreshes the bearer until the fixed eight-hour session boundary; the API rejects sandbox bearer use after that boundary as well.
 
-New sandbox creation is limited to 20 per source IP per hour per process. Financial REST writes and mutating Library bridge calls share the `/v1` write limiter by source IP; Library reads do not consume it. Because forwarded-IP trust is not configured here, visitors behind nginx share the proxy's rate-limit bucket; configure ingress limits / trusted proxy settings before widening access. Session creation and Library execution reject explicit cross-site requests and require either `Sec-Fetch-Site: same-origin` or an `Origin` whose host matches the request Host. Requests with neither signal are rejected.
+New sandbox creation defaults to 20 attempts per source IP per hour per process. REST and Library share tenant read/write budgets after authentication; pre-auth protection uses source IP with the explicit trusted-ingress policy above. Session creation and Library execution reject explicit cross-site requests and require either `Sec-Fetch-Site: same-origin` or an `Origin` whose host matches the request Host. Requests with neither signal are rejected.
 
 Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. REST mode uses the public `/v1` contract. Library mode invokes the allowlisted application services directly through the same-origin, session-authenticated demo bridge. Both use the active sandbox tenant; the host owns session provisioning while the released packages own financial rules.
 

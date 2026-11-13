@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { generateApiKey } from '@borecount/core/application';
 import { createHash } from 'node:crypto';
 import postgres from 'postgres';
 import { tsImport } from 'tsx/esm/api';
 const { testLibrary } = await tsImport('./library-api.test.mjs', import.meta.url);
+const { testHostProtection } = await tsImport('./host-protection.test.mjs', { parentURL: import.meta.url, tsconfig: fileURLToPath(new URL('../../apps/api/tsconfig.json', import.meta.url)) });
 import { testSandbox } from './sandbox-api.test.mjs';
 
 const databaseUrl = process.env.DATABASE_URL_TEST ??
@@ -82,6 +84,7 @@ try {
 
   await testSandbox(apiUrl, databaseUrl);
   await testLibrary(apiUrl, databaseUrl);
+  await testHostProtection(databaseUrl);
   console.log('Demo API integration passed: private sandboxes, canonical REST and direct library workflows');
 } finally {
   api.kill('SIGTERM');

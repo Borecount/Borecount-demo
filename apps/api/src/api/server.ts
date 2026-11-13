@@ -6,10 +6,9 @@ import { join } from 'node:path';
 import swaggerUiDist from 'swagger-ui-dist';
 import { parse as parseYaml } from 'yaml';
 import { issueAccessToken, type JwtAuthConfig, verifyAccessToken } from '@api/auth/jwt';
-import { RateLimitExceededError, sendDomainError } from '@api/errors';
+import { sendDomainError } from '@api/errors';
+import { HostProtection, protectReports } from './resource-protection/host-protection';
 import { ApiMetrics } from '@api/observability/metrics';
-import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
-import type { EndpointRateLimitConfig, RateLimitConfig } from '@api/rate-limit/policy';
 import type { CreateServerCoreOptions } from '@api/server-types';
 import type { OpenApiDocument } from '@api/openapi-types';
 import type { ApplicationServices } from '@borecount/core/application';
@@ -114,11 +113,6 @@ const isValidationError = (error: unknown): error is { validation: unknown; mess
   'message' in error &&
   typeof (error as { message: unknown }).message === 'string';
 
-interface RateLimitTarget {
-  keyPrefix: 'auth_token' | 'write';
-  policy: EndpointRateLimitConfig;
-}
-
 const routePath = (url: string): string => {
   const querySeparatorIndex = url.indexOf('?');
   if (querySeparatorIndex === -1) {
@@ -138,7 +132,7 @@ const resolveRouteLabel = (request: {
     return routeTemplate;
   }
 
-  return request.apiPath ?? routePath(request.url);
+  return '/unmatched';
 };
 
 interface RequestLogContext {
@@ -158,44 +152,27 @@ const buildRequestLogContext = (
   route,
 });
 
-const resolveRateLimitTarget = (
-  method: string,
-  path: string,
-  authTokenPolicy: EndpointRateLimitConfig,
-  writePolicy: EndpointRateLimitConfig,
-): RateLimitTarget | null => {
-  if (method !== 'POST' || !path.startsWith(V1_ROUTE_PREFIX)) {
-    return null;
-  }
-
-  if (path === TOKEN_ENDPOINT) {
-    return {
-      keyPrefix: 'auth_token',
-      policy: authTokenPolicy,
-    };
-  }
-
-  return {
-    keyPrefix: 'write',
-    policy: writePolicy,
-  };
-};
-
 export const createServerCore = (options: CreateServerCoreOptions): FastifyInstance => {
   const server = Fastify({
-    logger: options.logger,
+    logger: options.logger ? {
+      ...(typeof options.logger === 'object' ? options.logger : {}),
+      serializers: {
+        req: () => ({ redacted: true }),
+        res: (reply: { statusCode: number }) => ({ statusCode: reply.statusCode }),
+        err: () => ({ type: 'Error', message: 'Internal server error', stack: '' }),
+      },
+      redact: ['req.headers', 'res.headers', 'authorization', 'cookie', 'body', 'query'],
+    } : false,
     logController: new LogController({
       disableRequestLogging: true,
       requestIdLogLabel: 'requestId',
     }),
-    requestIdHeader: 'x-request-id',
+    bodyLimit: options.limits?.bodyBytes ?? 1_048_576,
+    trustProxy: options.trustedProxies ?? false,
+    requestIdHeader: false,
     genReqId: (request) => {
-      const headerValue = request.headers['x-request-id'];
-      if (typeof headerValue === 'string' && headerValue.length > 0) {
-        return headerValue;
-      }
-
-      return randomUUID();
+      const value = request.headers['x-request-id'];
+      return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : randomUUID();
     },
     ajv: {
       customOptions: {
@@ -217,11 +194,11 @@ export const createServerCore = (options: CreateServerCoreOptions): FastifyInsta
     try {
       await options.readinessCheck();
       return reply.status(200).send({ ok: true });
-    } catch (error) {
+    } catch {
       request.log.error(
         {
           ...buildRequestLogContext(request, '/ready'),
-          err: error,
+          statusCode: 503,
         },
         'Readiness check failed',
       );
@@ -257,7 +234,9 @@ export const createServerCore = (options: CreateServerCoreOptions): FastifyInsta
       .send(SWAGGER_UI_HTML);
   });
 
-  server.setErrorHandler((error, request, reply) => {
+  server.setNotFoundHandler((_request, reply) => reply.status(404).send({ error: 'NOT_FOUND', message: 'Route not found' }));
+
+  server.setErrorHandler((error, _request, reply) => {
     if (error instanceof Error && 'code' in error && error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
       return reply.status(413).send({
         error: 'PAYLOAD_TOO_LARGE',
@@ -265,41 +244,25 @@ export const createServerCore = (options: CreateServerCoreOptions): FastifyInsta
       });
     }
 
-    if (error instanceof RateLimitExceededError) {
-      reply.header('retry-after', String(error.retryAfterSeconds));
-      return reply.status(429).send({
-        error: error.code,
-        message: error.message,
-        retry_after_seconds: error.retryAfterSeconds,
-      });
-    }
-
-    if (isValidationError(error)) {
+    if (isValidationError(error) || (error instanceof Error && 'code' in error &&
+        ['FST_ERR_CTP_INVALID_JSON_BODY', 'FST_ERR_CTP_EMPTY_JSON_BODY', 'FST_ERR_CTP_INVALID_MEDIA_TYPE'].includes(String(error.code)))) {
       return reply.status(400).send({
         error: 'INVALID_INPUT',
-        message: error.message,
+        message: 'Invalid request',
       });
-    }
-
-    const hasCode =
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      typeof (error as { code: unknown }).code === 'string';
-
-    if (!hasCode) {
-      request.log.error(
-        {
-          ...buildRequestLogContext(request, resolveRouteLabel(request)),
-          err: error,
-        },
-        'Unhandled route error',
-      );
     }
 
     return sendDomainError(reply, error);
   });
 
+  server.addHook('onSend', async (request, reply, payload) => {
+    if (reply.statusCode >= 500 && request.routeOptions.url !== '/ready') {
+      reply.type('application/json');
+      reply.removeHeader('content-length');
+      return JSON.stringify({ error: 'INTERNAL_ERROR', message: 'Internal server error' });
+    }
+    return payload;
+  });
   return server;
 };
 
@@ -308,14 +271,12 @@ export const registerApplication = (
   {
     services,
     jwtAuth,
-    rateLimit,
     authorizeAdjustment,
-    rateLimiter = new FixedWindowLimiter(),
+    protection,
   }: {
     services: ApplicationServices;
     jwtAuth: JwtAuthConfig;
-    rateLimit: RateLimitConfig;
-    rateLimiter?: FixedWindowLimiter;
+    protection: HostProtection;
     authorizeAdjustment: AdjustmentAuthorizationHook<FastifyRequest>;
   },
 ): void => {
@@ -335,38 +296,13 @@ export const registerApplication = (
   );
 
   server.addHook('onRequest', async (request) => {
-    const path = routePath(request.url);
+    const path = request.routeOptions.url ?? routePath(request.url);
     request.apiPath = path;
 
-    const target = resolveRateLimitTarget(
-      request.method,
-      path,
-      rateLimit.authToken,
-      rateLimit.write,
-    );
-    if (target === null) {
-      return;
+    if (path.startsWith(V1_ROUTE_PREFIX) || path === '/demo/session' || path === '/demo/library/execute') {
+      protection.beforeAuth(request.ip);
     }
-
-    const decision = rateLimiter.consume(`${target.keyPrefix}:${request.ip}`, target.policy);
-    if (decision.allowed) {
-      return;
-    }
-
-    request.log.warn(
-      {
-        ...buildRequestLogContext(request, path),
-        endpoint: path,
-        limit: target.policy.maxRequests,
-        method: request.method,
-        scope: target.keyPrefix,
-        windowSeconds: target.policy.windowSeconds,
-        clientIp: request.ip,
-        retryAfterSeconds: decision.retryAfterSeconds,
-      },
-      'Request rate limited',
-    );
-    throw new RateLimitExceededError(decision.retryAfterSeconds);
+    if (path === TOKEN_ENDPOINT) protection.tokenAttempt(request.ip);
   });
 
   server.addHook('onRequest', async (request, reply) => {
@@ -409,7 +345,7 @@ export const registerApplication = (
     if (previousSigningKeyIndex !== null) {
       request.log.warn(
         {
-          ...buildRequestLogContext(request, path),
+          ...buildRequestLogContext(request, resolveRouteLabel(request)),
           apiKeyId: auth.apiKeyId,
           previousSigningKeyIndex,
           tenantId: auth.tenantId,
@@ -425,6 +361,16 @@ export const registerApplication = (
 
     if (path.startsWith('/v1/admin/') && auth.role !== ApiKeyRole.ADMIN) {
       throw new ForbiddenError('Admin API key is required');
+    }
+  });
+
+  server.addHook('preValidation', async request => {
+    if (request.apiPath === '/v1/transactions/bulk') protection.validateBulk(request.body);
+  });
+  server.addHook('preHandler', async request => {
+    const path = request.apiPath ?? '';
+    if (path.startsWith(V1_ROUTE_PREFIX) && path !== TOKEN_ENDPOINT && request.tenantId) {
+      protection.account(request.tenantId, request.method !== 'GET' && request.method !== 'HEAD');
     }
   });
 
@@ -446,6 +392,8 @@ export const registerApplication = (
     if ((statusCode === 401 || statusCode === 403) && route.startsWith(V1_ROUTE_PREFIX)) {
       metrics.incrementAuthFailure(route, statusCode);
     }
+
+    if (statusCode >= 500) request.log.error({ ...buildRequestLogContext(request, route), statusCode }, 'Request failed');
 
     request.log.info(
       {
@@ -487,5 +435,5 @@ export const registerApplication = (
     },
   );
 
-  registerLedgerAdapter(server, services, { authorizeAdjustment });
+  registerLedgerAdapter(server, protectReports(services, protection), { authorizeAdjustment });
 };

@@ -1,55 +1,35 @@
 import { parseIntegerWithinRange } from '../../utils/parse-integer-with-range';
-
-export interface EndpointRateLimitConfig {
-  maxRequests: number;
-  windowSeconds: number;
-}
-
+export interface EndpointRateLimitConfig { maxRequests: number; windowSeconds: number; }
 export interface RateLimitConfig {
   authToken: EndpointRateLimitConfig;
   write: EndpointRateLimitConfig;
+  read: EndpointRateLimitConfig;
+  abuse: EndpointRateLimitConfig;
+  session: EndpointRateLimitConfig;
+  maxKeys: number;
+  bodyBytes: number;
+  bulkItems: number;
+  reportConcurrency: number;
+  tenantReportConcurrency: number;
 }
-
-export const DEFAULT_AUTH_TOKEN_RATE_LIMIT_MAX_REQUESTS = 20;
-export const DEFAULT_AUTH_TOKEN_RATE_LIMIT_WINDOW_SECONDS = 60;
-export const DEFAULT_WRITE_RATE_LIMIT_MAX_REQUESTS = 120;
-export const DEFAULT_WRITE_RATE_LIMIT_WINDOW_SECONDS = 60;
-
-const parsePositiveInteger = (
-  value: string | undefined,
-  name: string,
-  defaultValue: number,
-): number => {
-  return parseIntegerWithinRange(value, {
-    defaultValue,
-    min: 1,
-    errorMessage: `${name} must be a positive integer`,
+const integer = (env: NodeJS.ProcessEnv, name: string, defaultValue: number, max: number) =>
+  parseIntegerWithinRange(env[name], { defaultValue, min: 1, max, errorMessage: `${name} must be an integer in 1..${max}` });
+export const parseRateLimitConfig = (env: NodeJS.ProcessEnv): RateLimitConfig => {
+  const policy = (name: string, requests: number, seconds = 60): EndpointRateLimitConfig => ({
+    maxRequests: integer(env, `RATE_LIMIT_${name}_MAX_REQUESTS`, requests, 1_000_000),
+    windowSeconds: integer(env, `RATE_LIMIT_${name}_WINDOW_SECONDS`, seconds, 86_400),
   });
+  const config = {
+    authToken: policy('AUTH_TOKEN', 20), write: policy('WRITE', 120), read: policy('READ', 600),
+    abuse: policy('ABUSE', 1200), session: policy('SESSION', 20, 3600),
+    maxKeys: integer(env, 'RATE_LIMIT_MAX_KEYS', 10_000, 100_000),
+    bodyBytes: integer(env, 'REQUEST_BODY_MAX_BYTES', 1_048_576, 16_777_216),
+    bulkItems: integer(env, 'REQUEST_BULK_MAX_ITEMS', 100, 100),
+    reportConcurrency: integer(env, 'REPORT_CONCURRENCY_MAX', 4, 1000),
+    tenantReportConcurrency: integer(env, 'REPORT_TENANT_CONCURRENCY_MAX', 2, 1000),
+  };
+  if (config.tenantReportConcurrency > config.reportConcurrency) {
+    throw new Error('REPORT_TENANT_CONCURRENCY_MAX must not exceed REPORT_CONCURRENCY_MAX');
+  }
+  return config;
 };
-
-export const parseRateLimitConfig = (env: NodeJS.ProcessEnv): RateLimitConfig => ({
-  authToken: {
-    maxRequests: parsePositiveInteger(
-      env.RATE_LIMIT_AUTH_TOKEN_MAX_REQUESTS,
-      'RATE_LIMIT_AUTH_TOKEN_MAX_REQUESTS',
-      DEFAULT_AUTH_TOKEN_RATE_LIMIT_MAX_REQUESTS,
-    ),
-    windowSeconds: parsePositiveInteger(
-      env.RATE_LIMIT_AUTH_TOKEN_WINDOW_SECONDS,
-      'RATE_LIMIT_AUTH_TOKEN_WINDOW_SECONDS',
-      DEFAULT_AUTH_TOKEN_RATE_LIMIT_WINDOW_SECONDS,
-    ),
-  },
-  write: {
-    maxRequests: parsePositiveInteger(
-      env.RATE_LIMIT_WRITE_MAX_REQUESTS,
-      'RATE_LIMIT_WRITE_MAX_REQUESTS',
-      DEFAULT_WRITE_RATE_LIMIT_MAX_REQUESTS,
-    ),
-    windowSeconds: parsePositiveInteger(
-      env.RATE_LIMIT_WRITE_WINDOW_SECONDS,
-      'RATE_LIMIT_WRITE_WINDOW_SECONDS',
-      DEFAULT_WRITE_RATE_LIMIT_WINDOW_SECONDS,
-    ),
-  },
-});

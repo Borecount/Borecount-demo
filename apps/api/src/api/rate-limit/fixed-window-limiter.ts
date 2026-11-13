@@ -1,48 +1,57 @@
 import type { EndpointRateLimitConfig } from '@api/rate-limit/policy';
 
 interface FixedWindowBucket {
-  windowStartMs: number;
+  expiresAtMs: number;
   count: number;
 }
-
 export interface RateLimitDecision {
   allowed: boolean;
   retryAfterSeconds: number;
 }
 
+/** Process-local, bounded storage. Active buckets are never evicted to admit new keys. */
 export class FixedWindowLimiter {
   private readonly buckets = new Map<string, FixedWindowBucket>();
+  private nextSweepMs = 0;
+  private earliestExpiryMs = Infinity;
 
-  public consume(
-    key: string,
-    policy: EndpointRateLimitConfig,
-    nowMs = Date.now(),
-  ): RateLimitDecision {
-    const windowMs = policy.windowSeconds * 1000;
-    const current = this.buckets.get(key);
-    const activeBucket =
-      current === undefined || nowMs >= current.windowStartMs + windowMs
-        ? { windowStartMs: nowMs, count: 0 }
-        : current;
+  constructor(private readonly maxKeys = 10_000, private readonly clock = Date.now) {
+    if (!Number.isSafeInteger(maxKeys) || maxKeys < 1) throw new Error('Invalid limiter capacity');
+  }
 
-    if (activeBucket.count >= policy.maxRequests) {
-      const retryAfterSeconds = Math.max(
-        1,
-        Math.ceil((activeBucket.windowStartMs + windowMs - nowMs) / 1000),
-      );
+  get size(): number { return this.buckets.size; }
 
-      return {
-        allowed: false,
-        retryAfterSeconds,
-      };
+  public consume(key: string, policy: EndpointRateLimitConfig, nowMs = this.clock()): RateLimitDecision {
+    if (!Number.isSafeInteger(policy.maxRequests) || policy.maxRequests < 1 ||
+        !Number.isSafeInteger(policy.windowSeconds) || policy.windowSeconds < 1 ||
+        policy.windowSeconds > 86_400) throw new Error('Invalid rate limit policy');
+    // Keys are host-generated IP/UUID contexts, never credentials or resource IDs.
+    if (key.length > 256) return { allowed: false, retryAfterSeconds: 1 };
+    if (nowMs >= this.nextSweepMs) {
+      this.earliestExpiryMs = Infinity;
+      for (const [storedKey, bucket] of this.buckets) {
+        if (nowMs >= bucket.expiresAtMs) this.buckets.delete(storedKey);
+        else this.earliestExpiryMs = Math.min(this.earliestExpiryMs, bucket.expiresAtMs);
+      }
+      this.nextSweepMs = nowMs + 1000;
     }
-
-    activeBucket.count += 1;
-    this.buckets.set(key, activeBucket);
-
-    return {
-      allowed: true,
-      retryAfterSeconds: 0,
-    };
+    let bucket = this.buckets.get(key);
+    if (bucket && nowMs >= bucket.expiresAtMs) {
+      this.buckets.delete(key);
+      bucket = undefined;
+    }
+    if (!bucket) {
+      if (this.buckets.size >= this.maxKeys) {
+        return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((Math.max(this.earliestExpiryMs, this.nextSweepMs) - nowMs) / 1000)) };
+      }
+      bucket = { expiresAtMs: nowMs + policy.windowSeconds * 1000, count: 0 };
+      this.buckets.set(key, bucket);
+      this.earliestExpiryMs = Math.min(this.earliestExpiryMs, bucket.expiresAtMs);
+    }
+    if (bucket.count >= policy.maxRequests) {
+      return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((bucket.expiresAtMs - nowMs) / 1000)) };
+    }
+    bucket.count++;
+    return { allowed: true, retryAfterSeconds: 0 };
   }
 }
