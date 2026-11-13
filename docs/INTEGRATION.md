@@ -66,8 +66,11 @@ All JSON errors use:
 | `403` | valid credential lacks admin role | `FORBIDDEN` |
 | `404` | tenant-scoped resource absent | `LEDGER_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `TRANSACTION_NOT_FOUND`, `HOLD_NOT_FOUND`, `RECONCILIATION_RUN_NOT_FOUND` |
 | `409` | state/policy conflict | `INVALID_HOLD_STATE_TRANSITION`, `OVERDRAFT_POLICY_VIOLATION` |
-| `429` | local fixed-window quota exceeded | `RATE_LIMIT_EXCEEDED` |
+| `413` | request body exceeds host byte limit | `PAYLOAD_TOO_LARGE` |
+| `429` | process-local quota or reporting concurrency exceeded | `RATE_LIMIT_EXCEEDED` |
 | `500` | unexpected/persistence failure | `INTERNAL_ERROR` |
+
+REST and Library share authenticated tenant read/write budgets and reporting permits. Host body/bulk limits can be stricter than the canonical maximum; see [Operations](OPERATIONS.md#rate-limits).
 
 For `429`, honor the integer `Retry-After` response header; the JSON body repeats it as `retry_after_seconds`. Retry `5xx`, `429`, and network failures with bounded exponential backoff and jitter. A transaction `reference` makes an uncertain POST safe to retry with exactly the same body.
 

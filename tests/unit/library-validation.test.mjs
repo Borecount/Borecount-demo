@@ -5,10 +5,11 @@ import { parse } from 'yaml';
 import Fastify from 'fastify';
 import { tsImport } from 'tsx/esm/api';
 
-const [{ registerLibrary }, { FixedWindowLimiter }, { parseRateLimitConfig }] = await Promise.all([
+const [{ registerLibrary }, { FixedWindowLimiter }, { parseRateLimitConfig }, { HostProtection }] = await Promise.all([
   tsImport('../../apps/api/src/demo/library.ts', import.meta.url),
   tsImport('../../apps/api/src/api/rate-limit/fixed-window-limiter.ts', import.meta.url),
   tsImport('../../apps/api/src/api/rate-limit/policy.ts', import.meta.url),
+  tsImport('../../apps/api/src/api/resource-protection/host-protection.ts', import.meta.url),
 ]);
 
 const specification = parse(
@@ -42,8 +43,7 @@ test('parameterized library calls reuse validators instead of growing the AJV ca
     services,
     async () => ({ tenant_id: tenantId, api_key_id: actorId }),
     {
-      rateLimiter: new FixedWindowLimiter(),
-      writePolicy: parseRateLimitConfig({}).write,
+      protection: new HostProtection(parseRateLimitConfig({}), new FixedWindowLimiter()),
     },
     specification,
   );

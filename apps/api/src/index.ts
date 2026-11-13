@@ -1,6 +1,7 @@
 import { parseJwtAuthConfig } from '@api/auth/policy';
 import { parseRateLimitConfig } from '@api/rate-limit/policy';
-import { FixedWindowLimiter } from '@api/rate-limit/fixed-window-limiter';
+import { HostProtection } from '@api/resource-protection/host-protection';
+import { parseTrustedProxies } from '@api/resource-protection/trusted-proxies';
 import { canonicalOpenApi, createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
 import { isMainModule } from './utils/is-main-module';
@@ -38,7 +39,11 @@ const parseShutdownTimeout = (value: string | undefined): number => {
 
 export const run = async (): Promise<void> => {
   const dbClient = createDbClient();
+  const rateLimit = parseRateLimitConfig(process.env);
+  const protection = new HostProtection(rateLimit);
   const server = createServerCore({
+    limits: rateLimit,
+    trustedProxies: parseTrustedProxies(process.env.TRUSTED_PROXY_CIDRS),
     readinessCheck: async () => {
       await dbClient.sql`select 1`;
     },
@@ -46,13 +51,10 @@ export const run = async (): Promise<void> => {
   });
   const services = createApplicationServices(dbClient);
   const jwtAuth = parseJwtAuthConfig(process.env);
-  const rateLimit = parseRateLimitConfig(process.env);
-  const rateLimiter = new FixedWindowLimiter();
   registerApplication(server, {
     services,
     jwtAuth,
-    rateLimit,
-    rateLimiter,
+    protection,
     authorizeAdjustment: async ({ tenantId, apiKeyId, apiKeyRole }) => {
       if (apiKeyRole !== ApiKeyRole.ADMIN) {
         const [sandbox] = await dbClient.sql`select id from demo_sessions
@@ -63,8 +65,7 @@ export const run = async (): Promise<void> => {
     },
   });
   registerSandbox(server, dbClient, services, jwtAuth, {
-    rateLimiter,
-    writePolicy: rateLimit.write,
+    protection,
     specification: canonicalOpenApi,
   });
   const port = parsePort(process.env.PORT);
@@ -92,9 +93,9 @@ export const run = async (): Promise<void> => {
       await dbClient.sql.end({ timeout: 5 });
       clearTimeout(hardStopTimer);
       process.exit(0);
-    } catch (error) {
+    } catch {
       clearTimeout(hardStopTimer);
-      server.log.error(error);
+      server.log.error({ event: 'host_failure' }, 'Host operation failed');
       process.exit(1);
     }
   };
@@ -112,8 +113,8 @@ export const run = async (): Promise<void> => {
       host: '0.0.0.0',
       port,
     });
-  } catch (error) {
-    server.log.error(error);
+  } catch {
+    server.log.error({ event: 'host_failure' }, 'Host operation failed');
 
     await dbClient.sql.end({ timeout: 5 });
 
@@ -122,5 +123,11 @@ export const run = async (): Promise<void> => {
 };
 
 if (isMainModule(import.meta.url)) {
-  await run();
+  try {
+    await run();
+  } catch {
+    // Configuration/driver initialization failures can contain connection secrets.
+    process.stderr.write('Host startup failed; check configuration and database availability\n');
+    process.exitCode = 1;
+  }
 }

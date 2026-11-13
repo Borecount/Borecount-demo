@@ -66,5 +66,13 @@ Before each call, verify `/ready`, open the UI in a private window, and follow
 [SALES_WALKTHROUGH.md](SALES_WALKTHROUGH.md).
 
 Back up the PostgreSQL volume before upgrades. Deploy a single API replica: migrations and the
-process-local rate limiter in this reference deployment are intentionally not designed for
+process-local quotas/concurrency guards in this reference deployment are intentionally not designed for
 multi-replica orchestration.
+
+The free LL-134 controls and all configuration units/defaults are documented in
+[OPERATIONS.md](OPERATIONS.md#rate-limits). Both execution modes share authenticated tenant budgets.
+Before widening access, configure the actual trusted nginx peer/network and verify the forwarding
+boundary; an empty allowlist intentionally shares the proxy IP abuse bucket. Production cookies are
+always Secure. Host tests do not establish deployed TLS, ingress or public-sandbox acceptance.
+Public exposure, storage lifecycle/cleanup and shared-VPS isolation remain LL-133; the full independently
+operable self-hosted installation/upgrade/backup/restore lifecycle remains LL-132.

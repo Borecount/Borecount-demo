@@ -11,8 +11,6 @@ import type { SandboxSession } from './sandbox-types';
 import type { LibraryBridgeOptions } from './library-types';
 import { isSameOrigin } from './same-origin';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
-import { FixedWindowLimiter } from '../api/rate-limit/fixed-window-limiter';
-import { RateLimitExceededError } from '../api/errors';
 
 const COOKIE = 'borecount_sandbox';
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -25,7 +23,6 @@ const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split('
   .map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 
 export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryOptions: LibraryBridgeOptions) {
-  const limiter = new FixedWindowLimiter();
   const unitOfWork = createUnitOfWork(db);
   const session = async (request: FastifyRequest): Promise<SandboxSession> => {
     const secret = cookieValue(request);
@@ -55,14 +52,17 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
 
   server.get('/demo/session', async (request, reply) => {
     reply.header('cache-control', 'no-store');
-    return payload(await session(request));
+    const identity = await session(request);
+    request.tenantId = identity.tenant_id;
+    request.apiKeyId = identity.api_key_id;
+    libraryOptions.protection.account(identity.tenant_id, false);
+    return payload(identity);
   });
 
   server.post('/demo/session', async (request, reply) => {
     // A new tenant is host provisioning, not part of the library's financial API.
     if (!isSameOrigin(request)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Same-origin session creation required' });
-    const decision = limiter.consume(request.ip, { maxRequests: 20, windowSeconds: 3600 });
-    if (!decision.allowed) throw new RateLimitExceededError(decision.retryAfterSeconds);
+    libraryOptions.protection.sessionAttempt(request.ip);
     const secret = randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + SESSION_SECONDS * 1000);
     const command = {
@@ -112,7 +112,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
     const previous = cookieValue(request);
     if (previous) await db.sql`update api_keys set revoked_at = now() where id in
       (select api_key_id from demo_sessions where token_hash = ${hash(previous)})`;
-    reply.header('set-cookie', `${COOKIE}=${secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_SECONDS}${request.protocol === 'https' || request.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''}`);
+    reply.header('set-cookie', `${COOKIE}=${secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_SECONDS}${request.protocol === 'https' || process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     reply.header('cache-control', 'no-store');
     return reply.code(201).send(await payload(row));
   });
