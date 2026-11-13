@@ -14,7 +14,7 @@ import { buildLibraryInputSchema, parseLibraryFilter } from './library-validatio
 
 interface ValidatedLibraryInput {
   readonly operation: PreparedLibraryOperation;
-  readonly call: LibraryCall;
+  readonly input: LibraryCall['input'];
   readonly where: unknown;
 }
 
@@ -22,6 +22,9 @@ function validate(
   call: LibraryCall,
   operation: PreparedLibraryOperation,
 ): ValidatedLibraryInput {
+  if (call.operation !== operation.metadata.operation) {
+    throw new LibraryInputError('Library operation does not match input schema');
+  }
   // AJV may coerce/default fields. Keep those changes separate from the submitted
   // JSON so validation never mutates journal/replay data supplied by the caller.
   const input = structuredClone(call.input);
@@ -36,21 +39,20 @@ function validate(
     if (where === null) throw new LibraryInputError('Invalid filter');
   }
 
-  return { operation, call: { operation: call.operation, input }, where };
+  return { operation, input, where };
 }
 
 // Carry the matching operation and parsed filter through the validation boundary;
 // argument construction must not reread the unvalidated request body.
 function buildArgs(
-  { operation, call, where }: ValidatedLibraryInput,
+  { operation, input, where }: ValidatedLibraryInput,
   identity: SandboxIdentity,
 ): unknown[] {
-  const { input } = call;
   const fields = operation.implementation.filterFields;
   let args: unknown[];
   try {
     args = libraryArguments(
-      { operation: call.operation, input },
+      { operation: operation.metadata.operation, input },
       identity.tenant_id,
       identity.api_key_id,
     );
@@ -151,7 +153,7 @@ export function registerLibrary(
       const response: LibraryExecutionResponse = {
         result,
         value,
-        call: { operation: call.operation, input: executedInput as LibraryCall['input'] },
+        call: { operation: operation.metadata.operation, input: executedInput as LibraryCall['input'] },
       };
 
       // Preserve the native journal value and normalized panel result as distinct
