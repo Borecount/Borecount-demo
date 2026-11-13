@@ -23,7 +23,7 @@ export const parseRateLimitConfig = (env: NodeJS.ProcessEnv): RateLimitConfig =>
     authToken: policy('AUTH_TOKEN', 20), write: policy('WRITE', 120), read: policy('READ', 600),
     abuse: policy('ABUSE', 1200), session: policy('SESSION', 20, 3600),
     maxKeys: integer(env, 'RATE_LIMIT_MAX_KEYS', 10_000, 100_000),
-    bodyBytes: integer(env, 'REQUEST_BODY_MAX_BYTES', 1_048_576, 16_777_216),
+    bodyBytes: integer(env, 'REQUEST_BODY_MAX_BYTES', 1_048_576, 1_048_576),
     bulkItems: integer(env, 'REQUEST_BULK_MAX_ITEMS', 100, 100),
     reportConcurrency: integer(env, 'REPORT_CONCURRENCY_MAX', 4, 1000),
     tenantReportConcurrency: integer(env, 'REPORT_TENANT_CONCURRENCY_MAX', 2, 1000),

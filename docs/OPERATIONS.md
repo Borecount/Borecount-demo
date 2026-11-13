@@ -27,7 +27,7 @@ The demo reads process environment directly. Node forbids `--env-file` in `NODE_
 | `RATE_LIMIT_ABUSE_MAX_REQUESTS` / `RATE_LIMIT_ABUSE_WINDOW_SECONDS` | `1200` / `60` | All `/v1/*`, `/demo/session`, and Library execute attempts per source IP before authentication/body parsing. Includes successful requests; separate from tenant budgets. |
 | `RATE_LIMIT_SESSION_MAX_REQUESTS` / `RATE_LIMIT_SESSION_WINDOW_SECONDS` | `20` / `3600` | Same-origin sandbox creation attempts per source IP/window. |
 | `RATE_LIMIT_MAX_KEYS` | `10000` | Integer 1–100000; maximum keys in **each** of four independent stores: abuse, token, session, tenant read/write. |
-| `REQUEST_BODY_MAX_BYTES` | `1048576` | Integer 1–16777216; decoded request-body bytes for REST, Library bridge and session endpoints. Oversize returns 413. |
+| `REQUEST_BODY_MAX_BYTES` | `1048576` | Integer 1–1048576; request-body bytes for REST, Library bridge and session endpoints. Oversize returns 413. |
 | `REQUEST_BULK_MAX_ITEMS` | `100` | Integer 1–100; host cap on transaction bulk items in both modes, before dispatch. May tighten, never raise the canonical maximum of 100. Oversize count returns 400. |
 | `REPORT_CONCURRENCY_MAX` | `4` | Integer 1–1000; total in-flight reporting service calls/process. No queue. |
 | `REPORT_TENANT_CONCURRENCY_MAX` | `2` | Integer 1–1000, at most global cap; report calls per authenticated tenant. |
@@ -50,7 +50,9 @@ A rejected quota, full key store or report-concurrency request returns `429`, `R
 {"error":"RATE_LIMIT_EXCEEDED","message":"Rate limit exceeded","retry_after_seconds":42}
 ```
 
-The delay is rounded up to whole seconds until the fixed window ends. Windows start with the first accepted attempt, and rejected attempts do not extend them. Concurrency rejection uses a one-second backoff hint, not a prediction of completion. All 5xx responses are sanitized; validation/body-size errors use governed 400/413 envelopes.
+The delay is rounded up to whole seconds until the fixed window ends. Windows start with the first accepted attempt, and rejected attempts do not extend them. Concurrency rejection uses a one-second backoff hint, not a prediction of completion. The demo supports at most 1 MiB (1048576 bytes). Both bundled nginx configurations explicitly use that ceiling and return the same JSON 413 envelope as the API: `{"error":"PAYLOAD_TOO_LARGE","message":"Request body is too large"}`. A lower `REQUEST_BODY_MAX_BYTES` is enforced by the API; values above 1 MiB fail startup validation. Ingress-generated 413 responses also carry a generated `X-Request-Id`.
+
+All 5xx responses are sanitized; validation/body-size errors use governed 400/413 envelopes.
 
 Each limiter store has a hard key cap. Expired buckets are reclaimed lazily (at most one full sweep/second; a requested expired key is reclaimed immediately); active buckets are never evicted to admit new identities. At capacity, new keys fail closed until expired keys are swept (up to one additional second). Existing keys keep their counters. Key lengths are bounded to 256 characters and secrets/URLs are never used as keys. Separate abuse/token/session stores prevent unauthenticated key churn from evicting tenant counters. Idle expired keys can remain until the next request, but storage remains bounded. In-flight report state is deleted in `finally`, after awaited service work completes, including failures; client disconnects cannot free a still-running query's permit.
 
@@ -68,7 +70,17 @@ By default forwarded IP/protocol headers are ignored and visitors behind nginx s
 
 Bundled nginx overwrites `X-Forwarded-For` with `$remote_addr` and `X-Forwarded-Proto` with `$scheme`, dropping caller-selected chains. If another load balancer terminates HTTPS first, configure and verify nginx's real-IP/HTTPS handling with that explicitly trusted upstream; do not blindly restore incoming forwarding headers. Fastify trusts forwarding information only from allowlisted peers. Production sandbox cookies are always Secure; local non-production HTTP cookies become Secure only when the trusted request protocol is HTTPS.
 
-Run `npm run test:unit` for bounded, clock-controlled window recovery, capacity/key-churn, concurrent mixed-mode requests, tenant/noisy-neighbor, proxy-spoof and captured-log privacy checks. `npm run test:integration` verifies real PostgreSQL atomicity/retries/isolation plus rejection and retry recovery with the composed host. These are local tests, not deployed ingress or multi-instance verification.
+Run `npm run test:unit` for bounded, clock-controlled window recovery, capacity/key-churn, concurrent mixed-mode requests, tenant/noisy-neighbor, proxy-spoof and captured-log privacy checks. `npm run test:integration` verifies real PostgreSQL atomicity/retries/isolation plus rejection and retry recovery with the composed host. The optional `tests/ingress/body-limit.mjs` test runs inside a disposable Node + nginx container with either bundled config mounted. It checks exact 1 MiB forwarding and next-byte rejection for both REST/Library paths, with Content-Length and chunked bodies, using a local counting upstream (no database). For example, after `docker build -f Dockerfile.render -t borecount-demo-ingress-test .`:
+
+```sh
+docker run --rm --network none --add-host api:127.0.0.1 \
+  --mount type=bind,src="$PWD/deploy/nginx.conf",dst=/etc/nginx/conf.d/default.conf,readonly \
+  --mount type=bind,src="$PWD/tests/ingress/body-limit.mjs",dst=/tmp/body-limit.mjs,readonly \
+  --entrypoint node borecount-demo-ingress-test /tmp/body-limit.mjs
+```
+
+Repeat with `deploy/render-nginx.conf` and `-e INGRESS_TEST_PORT=10000`.
+These are local tests, not deployed ingress or multi-instance verification.
 
 ## Health, readiness, and metrics
 

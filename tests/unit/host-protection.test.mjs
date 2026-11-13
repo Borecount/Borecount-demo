@@ -83,7 +83,7 @@ test('bounded buckets retain active quotas, reclaim expired keys, and recover ex
 });
 
 test('configuration rejects unsafe sizes, windows, capacities and proxy trust', () => {
-  for (const env of [{ RATE_LIMIT_READ_WINDOW_SECONDS: '86401' }, { REQUEST_BULK_MAX_ITEMS: '101' }, { RATE_LIMIT_MAX_KEYS: '0' }, { REQUEST_BODY_MAX_BYTES: 'Infinity' }, { REPORT_CONCURRENCY_MAX: '1' }]) {
+  for (const env of [{ RATE_LIMIT_READ_WINDOW_SECONDS: '86401' }, { REQUEST_BULK_MAX_ITEMS: '101' }, { RATE_LIMIT_MAX_KEYS: '0' }, { REQUEST_BODY_MAX_BYTES: 'Infinity' }, { REQUEST_BODY_MAX_BYTES: '1048577' }, { REPORT_CONCURRENCY_MAX: '1' }]) {
     assert.throws(() => parseRateLimitConfig(env));
   }
   for (const value of ['true', '*', '2', '0.0.0.0/0', '::/0', '10.0.0.1/33', '127.0.0.1/8/1']) assert.throws(() => parseTrustedProxies(value));
@@ -189,6 +189,21 @@ test('request bytes and lower host bulk cap reject both surfaces before executin
   assert.equal((await h.server.inject({ method: 'POST', url: '/v1/transactions/bulk', headers: headers(A), payload: { transactions } })).statusCode, 400);
   assert.equal((await h.library(A, 'transactions.createBulk', { transactions })).statusCode, 400);
   assert.deepEqual(h.counts(), { reads: 0, writes: 0 });
+});
+
+test('the 1 MiB API ceiling accepts exact-size JSON and rejects the next byte in both modes', async t => {
+  const h = await host();
+  t.after(h.close);
+  const limit = 1_048_576;
+  const restOverhead = Buffer.byteLength(JSON.stringify({ name: '' }));
+  const libraryOverhead = Buffer.byteLength(JSON.stringify({ operation: 'ledgers.create', input: { name: '' } }));
+  assert.equal((await h.rest(A, 'POST', { name: 'x'.repeat(limit - restOverhead) })).statusCode, 201);
+  assert.equal((await h.library(A, 'ledgers.create', { name: 'x'.repeat(limit - libraryOverhead) })).statusCode, 200);
+  for (const response of [await h.rest(A, 'POST', { name: 'x'.repeat(limit - restOverhead + 1) }), await h.library(A, 'ledgers.create', { name: 'x'.repeat(limit - libraryOverhead + 1) })]) {
+    assert.equal(response.statusCode, 413);
+    assert.deepEqual(response.json(), { error: 'PAYLOAD_TOO_LARGE', message: 'Request body is too large' });
+  }
+  assert.equal(h.counts().writes, 2);
 });
 
 test('forwarded IPs only affect abuse buckets for explicitly trusted peers', async t => {
