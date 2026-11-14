@@ -32,3 +32,14 @@ Not yet verified: live Neon managed-role setup and grants, actual Render Bluepri
 same-SHA web/cron deployment, DNS/managed HTTPS/Cloudflare boundary, real scheduled cleanup,
 notification delivery, account resource/billing limits and operating recovery. Follow
 [PUBLIC_DEMO.md](PUBLIC_DEMO.md) and retain sanitized live acceptance evidence before closing LL-133.
+
+## Live Neon preparation (partial)
+
+The existing dedicated demo database was inspected through Neon Console. It contained 17 sandbox
+tenants, 17 sessions and 34 opening postings, with no non-sandbox tenants or non-SERVICE keys.
+The initial ownership transaction hit a managed-role schema permission error and was rolled back;
+verification confirmed zero new roles and unchanged original owners. The corrected order grants
+schema ownership before transferring tables and now runs in tests under a NOSUPERUSER admin.
+The corrected transaction committed successfully in Neon: three service roles exist, application
+objects belong to borecount_demo_owner, and the 17/17/34 counts remain. Passwords were not set.
+Runtime grants, cleanup installation/scheduling and Render credential rollout remain separate steps.

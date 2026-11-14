@@ -16,6 +16,7 @@ const admin = postgres(target.href, { max: 1 });
 const created = [];
 const upgrading = process.argv.includes("--upgrade");
 let owner, runtime, cleanup, canary, server;
+let legacyRoleCreated = false;
 const passwords = Object.fromEntries(['owner', 'runtime', 'cleanup'].map(name => [name, randomBytes(32).toString('hex')]));
 const url = (database, role = target.username, password = target.password) => {
   const next = new URL(target); next.pathname = `/${database}`; next.username = role; next.password = password; return next.href;
@@ -23,6 +24,11 @@ const url = (database, role = target.username, password = target.password) => {
 const options = { parentURL: import.meta.url, tsconfig: fileURLToPath(new URL('../../apps/api/tsconfig.json', import.meta.url)) };
 try {
   await admin.unsafe('CREATE DATABASE luxledger_demo_hosted'); created.push('luxledger_demo_hosted');
+  if (upgrading) {
+    await admin.unsafe(`CREATE ROLE legacy_demo_admin LOGIN CREATEDB CREATEROLE BYPASSRLS NOSUPERUSER PASSWORD '${passwords.owner}'`);
+    legacyRoleCreated = true;
+    await admin.unsafe('ALTER DATABASE luxledger_demo_hosted OWNER TO legacy_demo_admin');
+  }
   await admin.unsafe('CREATE DATABASE public_host_canary'); created.push('public_host_canary');
   await admin.unsafe('REVOKE ALL ON DATABASE public_host_canary FROM PUBLIC');
   canary = postgres(url('public_host_canary'), { max: 1 });
@@ -33,7 +39,8 @@ try {
     tsImport('../../apps/api/src/api/resource-protection/host-protection.ts', options), tsImport('../../apps/api/src/demo/public-host.ts', options),
   ]);
   const jwtAuth = { signingKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY', previousSigningKeys: [], issuer: 'public-host-test', accessTokenTtlSeconds: 900, clockSkewSeconds: 0 };
-  const cluster = postgres(url('luxledger_demo_hosted'), { max: 1 });
+  const legacyUrl = upgrading ? url('luxledger_demo_hosted', 'legacy_demo_admin', passwords.owner) : url('luxledger_demo_hosted');
+  const cluster = postgres(legacyUrl, { max: 1 });
   const migrateUrl = url('luxledger_demo_hosted', 'borecount_demo_owner', passwords.owner);
   try {
     if (!upgrading) {
@@ -42,11 +49,11 @@ try {
       await cluster.unsafe(roles);
     }
     const migrated = spawnSync('npm', ['run', 'db:migrate'], {
-      env: { ...process.env, DATABASE_URL: upgrading ? url('luxledger_demo_hosted') : migrateUrl }, stdio: 'pipe',
+      env: { ...process.env, DATABASE_URL: upgrading ? legacyUrl : migrateUrl }, stdio: 'pipe',
     });
     assert.equal(migrated.status, 0, 'Initial schema migration must succeed');
     if (upgrading) {
-      const oldDb = createDbClient({ databaseUrl: url('luxledger_demo_hosted') });
+      const oldDb = createDbClient({ databaseUrl: legacyUrl });
       const oldServices = createApplicationServices(oldDb);
       const oldProtection = new HostProtection();
       const oldHost = createServerCore({ logger: false, readinessCheck: async () => {} });
@@ -56,6 +63,7 @@ try {
         const legacy = await oldHost.inject({ method: 'POST', url: '/demo/session', headers: { host: 'demo.test', origin: 'https://demo.test' } });
         assert.equal(legacy.statusCode, 201, legacy.body);
       } finally { await oldHost.close(); await oldDb.sql.end({ timeout: 5 }); }
+      assert.equal((await cluster`select rolsuper from pg_roles where rolname = current_user`)[0].rolsuper, false, 'Upgrade must be exercised without real superuser privileges');
       const balances = await cluster`select id, balance_minor::text from accounts order by id`;
       const history = await cluster`select id, reference from transactions order by id`;
       assert.equal(balances.length, 12); assert.equal(history.length, 2);
@@ -149,5 +157,6 @@ try {
   if (owner) {
     for (const name of ['runtime', 'cleanup', 'owner']) await admin.unsafe(`DROP ROLE borecount_demo_${name}`);
   }
+  if (legacyRoleCreated) await admin.unsafe('DROP ROLE legacy_demo_admin');
   await admin.end({ timeout: 5 });
 }

@@ -22,10 +22,16 @@ CREATE ROLE borecount_demo_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOB
 CREATE ROLE borecount_demo_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 CREATE ROLE borecount_demo_cleanup LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 -- No passwords are set here. Their secure entry is a separate user-owned step.
+GRANT CONNECT ON DATABASE luxledger_demo_hosted TO borecount_demo_owner, borecount_demo_runtime, borecount_demo_cleanup;
+GRANT CREATE ON DATABASE luxledger_demo_hosted TO borecount_demo_owner;
 DO $$
 DECLARE item record;
 BEGIN
   EXECUTE format('GRANT borecount_demo_owner TO %I', current_user);
+  -- PostgreSQL requires the new owner to have CREATE on each schema before table transfer.
+  -- Managed Neon admins are not real superusers, so ordering matters.
+  ALTER SCHEMA public OWNER TO borecount_demo_owner;
+  ALTER SCHEMA drizzle OWNER TO borecount_demo_owner;
   FOR item IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname IN ('public','drizzle') LOOP
     EXECUTE format('ALTER TABLE %I.%I OWNER TO borecount_demo_owner', item.schemaname, item.tablename);
   END LOOP;
@@ -38,10 +44,6 @@ BEGIN
     EXECUTE format('ALTER FUNCTION %s OWNER TO borecount_demo_owner', item.identity);
   END LOOP;
 END $$;
-ALTER SCHEMA public OWNER TO borecount_demo_owner;
-ALTER SCHEMA drizzle OWNER TO borecount_demo_owner;
-GRANT CONNECT ON DATABASE luxledger_demo_hosted TO borecount_demo_owner, borecount_demo_runtime, borecount_demo_cleanup;
-GRANT CREATE ON DATABASE luxledger_demo_hosted TO borecount_demo_owner;
 ALTER ROLE borecount_demo_runtime SET statement_timeout = '15s';
 ALTER ROLE borecount_demo_runtime SET lock_timeout = '2s';
 ALTER ROLE borecount_demo_runtime SET idle_in_transaction_session_timeout = '15s';
