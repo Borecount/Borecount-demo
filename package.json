@@ -27,7 +27,7 @@
     "test": "npm run test:unit && npm run verify:openapi && npm run verify:schema && npm run typecheck && npm run build && npm run test:integration && npm run test:e2e",
     "generate:api": "node scripts/generate-api-types.mjs",
     "verify:schema": "node --import tsx scripts/verify-schema.mjs",
-    "test:public": "node tests/integration/public-host.test.mjs",
+    "test:public": "node tests/integration/public-host.test.mjs && node tests/integration/public-host.test.mjs --upgrade",
     "smoke:public": "node scripts/public-demo-smoke.mjs",
     "monitor:public": "node scripts/public-demo-smoke.mjs --read-only",
     "db:prepare:public": "node scripts/prepare-public-demo.mjs"

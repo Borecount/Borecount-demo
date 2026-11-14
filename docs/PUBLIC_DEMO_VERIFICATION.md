@@ -2,13 +2,15 @@
 
 Scope: implementation working tree on `codex/ll-133-public-hosting`, based on main `b85481b`.
 These results are local evidence, not a completed live Render/Neon rollout.
+The CI API process cleanup was subsequently corrected to stop the listening Node process directly;
+integration → all 20 E2E tests passed sequentially with explicit port-release verification.
 
 | Check | Result |
 | --- | --- |
 | Unit tests | 17 passed |
 | Real PostgreSQL integration | Passed: sandbox 99 HTTP requests, Library workflows, mixed-mode quotas, retries, rollback, isolation and expiry |
 | Chromium | 20 passed, including landing → release guides → posting → pilot contact link |
-| Public-host PostgreSQL test | Passed using a separate temporary PostgreSQL 16 cluster |
+| Public-host PostgreSQL test | Fresh setup and existing-installation upgrade passed using a separate temporary PostgreSQL 16 cluster; prior opening balances/history preserved |
 | Public-host safety | Non-owner RLS; denied DDL/TRUNCATE/cleanup; inaccessible canary; tenant/hour/concurrent seed limits; refusal of non-sandbox identities/unreviewed schema; restricted cron reset; old-token invalidation |
 | TypeScript / OpenAPI / generated types / schema snapshot | Passed |
 | Application build | Passed |

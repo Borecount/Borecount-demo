@@ -1,7 +1,7 @@
 # Our public demo: Render + Neon (LL-133)
 
 This is the deployment/runbook for **our** public Borecount demo at `https://borecount.dev/`,
-with the existing Render service `luxledger-demo` and a **separate disposable Neon project**.
+with the existing Render service `borecount-demo` and a **separate disposable Neon project**.
 It is not the customer self-hosted distribution (LL-132).
 
 Use simulated test data only. No customer records, real payment details, production secrets,
@@ -32,6 +32,28 @@ production data. Merely renaming a database in a production project is not this 
 LL-132/135 own general installation/upgrade/backup/verified restore; LL-134 supplies reusable host
 limits; LL-136 covers isolation assurance. Daily disposable reset is not backup or portable tenant
 restore (LL-137). Public evaluation does not depend on commercial entitlement or SaaS enrollment.
+
+## Update our existing deployment first
+
+Our existing Neon project is dedicated to the demo and already contains `luxledger_demo_hosted`.
+Reuse that project, database, Render service `borecount-demo` (`srv-d9j1um3eo5us73anf95g`),
+current paid compute plan, domain and certificate. Do not run `neon-init.sql` against it.
+
+1. Verify actual table owners, migration history and that all identities are sandbox SERVICE data.
+2. Review/run `deploy/public/neon-upgrade.sql` as the current managed admin. It creates three
+   initially passwordless roles, transfers only the existing public/drizzle application objects,
+   and sets query/lock timeouts. It does not create/reset a database or delete financial data.
+   If a lock/schema/identity guard fails, the transaction rolls back; investigate rather than reset.
+3. In the same SQL session, run `SET ROLE borecount_demo_owner`, then `prepare.sql`, then
+   `RESET ROLE`. This installs permissions/marker/functions; it does not execute cleanup.
+4. The account owner securely sets the two operational role passwords and enters each direct
+   verified-TLS connection in its corresponding Render service. The migration owner can remain
+   NOLOGIN when migrations are run via the managed admin's explicit SET ROLE.
+5. Keep the old Render connection active until replacement permissions are verified. Update the
+   existing service and add cleanup cron; no project, domain, certificate or paid web-plan migration
+   is needed. Enable the daily-reset schedule only after reviewing its destructive scope.
+
+The initial-install instructions below apply only to a genuinely new empty project.
 
 ## Prepare the dedicated Neon project
 
@@ -75,7 +97,7 @@ replacement of the disposable installation, not blind replay.
 
 ## Configure and release on Render
 
-Use `render.yaml` to configure our existing `luxledger-demo` and `borecount-demo-cleanup` cron.
+Use `render.yaml` to configure our existing `borecount-demo` and `borecount-demo-cleanup` cron.
 Blueprint service names can match existing services; review that mapping before applying. For
 existing Blueprints, add new `sync: false` secrets manually—Render prompts only on initial creation.
 See [Blueprint configuration](https://render.com/docs/blueprint-spec).

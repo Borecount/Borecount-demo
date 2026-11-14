@@ -14,6 +14,7 @@ assert.equal(target.pathname, '/postgres');
 assert.notEqual(target.port || '5432', '5432', 'Never run against the default database port');
 const admin = postgres(target.href, { max: 1 });
 const created = [];
+const upgrading = process.argv.includes("--upgrade");
 let owner, runtime, cleanup, canary, server;
 const passwords = Object.fromEntries(['owner', 'runtime', 'cleanup'].map(name => [name, randomBytes(32).toString('hex')]));
 const url = (database, role = target.username, password = target.password) => {
@@ -27,15 +28,46 @@ try {
   canary = postgres(url('public_host_canary'), { max: 1 });
   await canary`create table private_canary (value text)`;
   await canary`insert into private_canary values ('untouched')`;
+  const [{ createServerCore, registerApplication, canonicalOpenApi }, { registerSandbox }, { HostProtection }, { assertPublicHost, assertSandboxCapacity }] = await Promise.all([
+    tsImport('../../apps/api/src/api/server.ts', options), tsImport('../../apps/api/src/demo/sandbox.ts', options),
+    tsImport('../../apps/api/src/api/resource-protection/host-protection.ts', options), tsImport('../../apps/api/src/demo/public-host.ts', options),
+  ]);
+  const jwtAuth = { signingKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY', previousSigningKeys: [], issuer: 'public-host-test', accessTokenTtlSeconds: 900, clockSkewSeconds: 0 };
   const cluster = postgres(url('luxledger_demo_hosted'), { max: 1 });
-  try {
-    let roles = await readFile('tests/integration/public-roles.sql', 'utf8');
-    for (const [name, password] of Object.entries(passwords)) roles = roles.replaceAll(`:'${name}_password'`, `'${password}'`);
-    await cluster.unsafe(roles);
-  } finally { await cluster.end({ timeout: 5 }); }
   const migrateUrl = url('luxledger_demo_hosted', 'borecount_demo_owner', passwords.owner);
-  const migrated = spawnSync('npm', ['run', 'db:migrate'], { env: { ...process.env, DATABASE_URL: migrateUrl }, stdio: 'pipe' });
-  assert.equal(migrated.status, 0, 'Migrations must run using the non-superuser owner');
+  try {
+    if (!upgrading) {
+      let roles = await readFile('tests/integration/public-roles.sql', 'utf8');
+      for (const [name, password] of Object.entries(passwords)) roles = roles.replaceAll(`:'${name}_password'`, `'${password}'`);
+      await cluster.unsafe(roles);
+    }
+    const migrated = spawnSync('npm', ['run', 'db:migrate'], {
+      env: { ...process.env, DATABASE_URL: upgrading ? url('luxledger_demo_hosted') : migrateUrl }, stdio: 'pipe',
+    });
+    assert.equal(migrated.status, 0, 'Initial schema migration must succeed');
+    if (upgrading) {
+      const oldDb = createDbClient({ databaseUrl: url('luxledger_demo_hosted') });
+      const oldServices = createApplicationServices(oldDb);
+      const oldProtection = new HostProtection();
+      const oldHost = createServerCore({ logger: false, readinessCheck: async () => {} });
+      registerApplication(oldHost, { services: oldServices, jwtAuth, protection: oldProtection, authorizeAdjustment: false });
+      registerSandbox(oldHost, oldDb, oldServices, jwtAuth, { protection: oldProtection, specification: canonicalOpenApi });
+      try {
+        const legacy = await oldHost.inject({ method: 'POST', url: '/demo/session', headers: { host: 'demo.test', origin: 'https://demo.test' } });
+        assert.equal(legacy.statusCode, 201, legacy.body);
+      } finally { await oldHost.close(); await oldDb.sql.end({ timeout: 5 }); }
+      const balances = await cluster`select id, balance_minor::text from accounts order by id`;
+      const history = await cluster`select id, reference from transactions order by id`;
+      assert.equal(balances.length, 12); assert.equal(history.length, 2);
+      await cluster.unsafe(await readFile('deploy/public/neon-upgrade.sql', 'utf8'));
+      assert.deepEqual(await cluster`select id, balance_minor::text from accounts order by id`, balances);
+      assert.deepEqual(await cluster`select id, reference from transactions order by id`, history);
+      for (const [name, password] of Object.entries(passwords)) {
+        // Test fixtures only. Live password entry is performed by the account owner.
+        await cluster.unsafe(`ALTER ROLE borecount_demo_${name} LOGIN PASSWORD '${password}'`);
+      }
+    }
+  } finally { await cluster.end({ timeout: 5 }); }
   owner = postgres(migrateUrl, { max: 1, onnotice: () => {} });
   const setup = (await readFile('deploy/public/prepare.sql', 'utf8')).replace(/^\\set.*$/gm, '');
   await owner.unsafe(setup);
@@ -45,10 +77,6 @@ try {
   assert.deepEqual(await owner`select next_reset_at from demo_ops.state`, before);
   runtime = createDbClient({ databaseUrl: url('luxledger_demo_hosted', 'borecount_demo_runtime', passwords.runtime) });
   cleanup = postgres(url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup), { max: 1 });
-  const [{ createServerCore, registerApplication, canonicalOpenApi }, { registerSandbox }, { HostProtection }, { assertPublicHost, assertSandboxCapacity }] = await Promise.all([
-    tsImport('../../apps/api/src/api/server.ts', options), tsImport('../../apps/api/src/demo/sandbox.ts', options),
-    tsImport('../../apps/api/src/api/resource-protection/host-protection.ts', options), tsImport('../../apps/api/src/demo/public-host.ts', options),
-  ]);
   await assertPublicHost(runtime);
   await assert.rejects(() => runtime.sql`select demo_ops.cleanup_due()`);
   await assert.rejects(() => runtime.sql`truncate public.demo_sessions`);
@@ -61,12 +89,11 @@ try {
     try { await assert.rejects(() => denied`select * from private_canary`); }
     finally { await denied.end({ timeout: 5 }); }
   }
-  const jwtAuth = { signingKey: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY', previousSigningKeys: [], issuer: 'public-host-test', accessTokenTtlSeconds: 900, clockSkewSeconds: 0 };
   const services = createApplicationServices(runtime);
   const protection = new HostProtection();
   server = createServerCore({ logger: false, readinessCheck: async () => { await runtime.sql`select 1`; } });
   registerApplication(server, { services, jwtAuth, protection, authorizeAdjustment: false });
-  process.env.SANDBOX_MAX_TENANTS = '2';
+  process.env.SANDBOX_MAX_TENANTS = upgrading ? '3' : '2';
   registerSandbox(server, runtime, services, jwtAuth, { protection, specification: canonicalOpenApi });
   delete process.env.SANDBOX_MAX_TENANTS;
   const start = () => server.inject({ method: 'POST', url: '/demo/session', headers: { host: 'demo.test', origin: 'https://demo.test' } });
@@ -83,7 +110,7 @@ try {
     expect(await start(), 429);
   });
   const [{ n }] = await runtime.sql`select count(*)::int as n from tenants`;
-  assert.equal(n, 2, 'Rejected seed must not leave a tenant');
+  assert.equal(n, upgrading ? 3 : 2, 'Rejected seed must not leave a tenant');
   assert.equal((await runtime.sql`select * from accounts`).length, 0, 'Raw runtime queries cannot bypass tenant RLS');
   const accounts = expect(await rest(`/v1/accounts?ledger_id=${ledger.id}`), 200).data;
   const body = { ledger_id: ledger.id, reference: 'public-profile-posting', currency: 'USD', entries: [
@@ -113,7 +140,7 @@ try {
   expect(await rest('/v1/ledgers'), 401);
   expect(await start(), 201);
   assert.deepEqual([...await canary`select value from private_canary`], [{ value: 'untouched' }]);
-  console.log('Public host passed: unprivileged migration/runtime, RLS, seed cap, posting/retry, fixed-target cleanup, token invalidation, non-sandbox refusal and inaccessible canary');
+  console.log((upgrading ? 'Existing demo upgrade preserved balances/history. ' : '') + 'Public host passed: unprivileged migration/runtime, RLS, seed cap, posting/retry, fixed-target cleanup, token invalidation, non-sandbox refusal and inaccessible canary');
 } finally {
   delete process.env.SANDBOX_MAX_TENANTS;
   await server?.close();

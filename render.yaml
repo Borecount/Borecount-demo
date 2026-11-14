@@ -2,7 +2,7 @@
 # Bootstrap the separate Neon demo project with deploy/public/neon-init.sql first.
 services:
   - type: web
-    name: luxledger-demo
+    name: borecount-demo
     runtime: docker
     dockerfilePath: ./Dockerfile.render
     region: frankfurt
