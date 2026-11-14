@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:net';
 import { generateApiKey } from '@borecount/core/application';
 import { createHash } from 'node:crypto';
 import postgres from 'postgres';
@@ -43,6 +44,13 @@ const waitForApi = async () => {
   throw new Error('Integration API did not become ready');
 };
 
+const assertApiPortAvailable = () => new Promise((resolve, reject) => {
+  const probe = createServer();
+  probe.once('error', () => reject(new Error('Integration API port 3100 is still occupied')));
+  probe.listen(3100, '127.0.0.1', () => probe.close(error => error ? reject(error) : resolve()));
+});
+
+await assertApiPortAvailable();
 await run('node', ['scripts/prepare-test-db.mjs'], testEnvironment);
 const bootstrapKey = generateApiKey();
 const bootstrapEnvironment = {
@@ -63,7 +71,16 @@ try {
   await bootstrapSql.end({ timeout: 5 });
 }
 
-const api = spawn('npm', ['run', 'start'], { env: testEnvironment, stdio: 'inherit' });
+// Own the listening Node process directly. Killing npm can leave its API child alive on Linux.
+const api = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+  cwd: fileURLToPath(new URL('../../apps/api/', import.meta.url)),
+  env: testEnvironment,
+  stdio: 'inherit',
+});
+const apiExit = new Promise((resolve, reject) => {
+  api.once('error', reject);
+  api.once('close', resolve);
+});
 
 try {
   await waitForApi();
@@ -88,5 +105,11 @@ try {
   console.log('Demo API integration passed: private sandboxes, canonical REST and direct library workflows');
 } finally {
   api.kill('SIGTERM');
-  await new Promise((resolve) => api.once('exit', resolve));
+  const deadline = setTimeout(() => api.kill('SIGKILL'), 15_000);
+  try {
+    await apiExit;
+  } finally {
+    clearTimeout(deadline);
+  }
+  await assertApiPortAvailable();
 }
