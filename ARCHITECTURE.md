@@ -48,7 +48,7 @@ Swagger UI assets are served locally under `/docs/`. The presentation JSON at `/
 
 Legacy financial wrappers and global reset routes are absent. The host exposes session provisioning and the Library execution bridge. See [CONSOLE.md](docs/CONSOLE.md) and [OPERATIONS.md](docs/OPERATIONS.md).
 
-The server registry in `apps/api/src/demo/library-registry.ts` binds each allowed operation to a typed service call, explicit result mapper, and filter policy. `library-validation.ts` derives camelCase input schemas from the canonical document supplied by the host. The bridge compiles those schemas before accepting traffic, validates the editor input, then constructs trusted service arguments. REST and Library mutations consume the same configured write quota per source IP.
+The server registry in `apps/api/src/demo/library-registry.ts` binds each allowed operation to a typed service call, explicit result mapper, and filter policy. `library-validation.ts` derives camelCase input schemas from the canonical document supplied by the host. The bridge compiles those schemas before accepting traffic, validates the editor input, then constructs trusted service arguments. REST and Library mutations consume the same configured write quota per authenticated tenant.
 
 The browser composition in `App.tsx` uses `useSandbox` for data and request lifecycle, `useExecutionMode` for guarded mode changes, `useJournal` for execution history, and `useWorkflow` for drafts and guided steps. Each workspace section renders through its own component. Scenario data lives in `workflows.ts`; an invalid draft keeps its current mode and remains editable until repaired.
 
@@ -88,6 +88,14 @@ There are three layers:
 The coordinated package set uses the canonical structural `isDomainError` guard across public export identities. The PostgreSQL and HTTP boundaries preserve valid domain statuses while continuing to hide raw database and unknown errors as non-leaking `500 INTERNAL_ERROR` responses; no demo-specific error restoration is required.
 
 Authentication errors map to `401 UNAUTHORIZED`, authorization to `403 FORBIDDEN`, missing resources normally to `404`, state conflicts to `409`, and rate limits to `429 RATE_LIMIT_EXCEEDED` with both `Retry-After` and `retry_after_seconds`. Every response includes `x-request-id`; a client-supplied `x-request-id` is retained for correlation.
+
+## Public sandbox operations
+
+`render.yaml` provides our disposable Render + Neon public demo. Migration, runtime and cleanup
+roles are distinct; cleanup has access only to a fixed-target reset function. Database-serialized
+admission caps retained sessions and hourly seeds; the public profile resets the whole simulated
+installation daily. No library business rules or history triggers are modified. See
+[PUBLIC_DEMO.md](docs/PUBLIC_DEMO.md) for release, HTTPS, trust boundaries and operating limits.
 
 ## Deployment topology
 

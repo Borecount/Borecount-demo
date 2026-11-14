@@ -7,6 +7,13 @@ COPY apps/web/package.json apps/web/package.json
 RUN npm ci
 COPY shared shared
 COPY apps/web apps/web
+COPY scripts/build-public-docs.mjs scripts/build-public-docs.mjs
+COPY docs docs
+COPY README.md ARCHITECTURE.md ./
+ARG RELEASE_SHA
+ARG VITE_PUBLIC_URL=https://borecount.dev/
+ENV RELEASE_SHA=$RELEASE_SHA
+ENV VITE_PUBLIC_URL=$VITE_PUBLIC_URL
 RUN npm run build -w @borecount/demo-web
 
 FROM nginx:1.27-alpine

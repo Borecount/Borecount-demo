@@ -6,6 +6,9 @@ This runbook deploys the interactive console as three containers:
 browser → nginx (web + same-origin proxy) → Fastify API → PostgreSQL 16
 ```
 
+For the Render + Neon public evaluation deployment, use [PUBLIC_DEMO.md](PUBLIC_DEMO.md).
+This private Compose profile does not install the public Render/Neon cleanup or restricted roles.
+
 It is a private sales demo, not a production SaaS deployment. Put port 8080 behind HTTPS and
 access control supplied by the hosting platform, VPN, or identity-aware proxy. Do not expose it
 as an anonymous public service.

@@ -16,7 +16,7 @@
     "@borecount/http": "0.8.0",
     "@borecount/postgres-adapter": "0.8.0",
     "drizzle-orm": "0.45.2",
-    "fastify": "5.10.0",
+    "fastify": "5.12.8",
     "postgres": "3.4.8",
     "safe-stable-stringify": "^2.5.0",
     "swagger-ui-dist": "^5.34.0",

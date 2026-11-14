@@ -11,6 +11,7 @@ import type { SandboxSession } from './sandbox-types';
 import type { LibraryBridgeOptions } from './library-types';
 import { isSameOrigin } from './same-origin';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
+import { assertSandboxCapacity, parseSandboxLimits } from './public-host';
 
 const COOKIE = 'borecount_sandbox';
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -24,6 +25,7 @@ const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split('
 
 export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryOptions: LibraryBridgeOptions) {
   const unitOfWork = createUnitOfWork(db);
+  const sandboxLimits = parseSandboxLimits(process.env);
   const session = async (request: FastifyRequest): Promise<SandboxSession> => {
     const secret = cookieValue(request);
     if (!secret || !/^[a-f0-9]{64}$/.test(secret)) throw new UnauthorizedError('Start a demo session first');
@@ -73,6 +75,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
       rawApiKey: generateApiKey(),
     };
     const row = await unitOfWork.run(new TenantId(command.tenantId), async ({ provisioning, services, tx }) => {
+      await assertSandboxCapacity(tx, sandboxLimits);
       const provisioned = await provisioning.provisionTenant(command);
       for (const code of ['USD', 'EUR'] as const) {
         const profile = sandboxProfiles[code];

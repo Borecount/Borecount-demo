@@ -12,6 +12,13 @@ COPY apps/api apps/api
 COPY apps/web apps/web
 COPY drizzle drizzle
 COPY openapi openapi
+COPY scripts/build-public-docs.mjs scripts/build-public-docs.mjs
+COPY docs docs
+COPY README.md ARCHITECTURE.md ./
+ARG RELEASE_SHA
+ARG RENDER_GIT_COMMIT
+ENV RELEASE_SHA=$RELEASE_SHA
+ENV RENDER_GIT_COMMIT=$RENDER_GIT_COMMIT
 ARG VITE_PUBLIC_URL=https://borecount.dev/
 RUN npm run build -w @borecount/demo-web
 
@@ -19,9 +26,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends nginx \
   && rm -rf /var/lib/apt/lists/*
 
-COPY deploy/render-nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/render-nginx.conf /etc/nginx/templates/demo.conf
+COPY deploy/render-configure.mjs deploy/render-configure.mjs
 COPY deploy/render-entrypoint.sh /usr/local/bin/render-entrypoint
-RUN chmod +x /usr/local/bin/render-entrypoint
+RUN chmod +x /usr/local/bin/render-entrypoint \
+  && rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
 
 ENV NODE_ENV=production
 EXPOSE 10000
