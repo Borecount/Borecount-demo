@@ -16,16 +16,16 @@ borecount.dev → Render managed HTTPS → nginx :10000 → API 127.0.0.1:3000
                                                         ↓ runtime role
                                           dedicated Neon PostgreSQL 16
                                                         ↑ restricted function
-                             Render Cron Job (every 5 minutes, cleanup role)
+                             GitHub Actions (every 5 minutes, cleanup role)
 ```
 
-`render.yaml` defines one bounded web instance and one cleanup cron. Render supplies TLS,
+`render.yaml` defines one bounded web instance. GitHub Actions schedules cleanup. Render supplies TLS,
 health-based routing/restarts, service resource limits and notifications. Neon supplies the
 separate database/compute boundary. There is no Caddy/VPS/Docker Compose requirement for this
 public deployment. The existing `compose.hosted.yml` remains the separate private/local demo.
 
-The web service gets **only** the runtime DB credential and JWT signing secret. Cron gets **only**
-the cleanup DB credential. Neither receives the migration owner, Neon API token, production DB
+The web service gets **only** the runtime DB credential and JWT signing secret. The cleanup step
+gets **only** the cleanup DB credential from GitHub Secrets. Neither receives the migration owner, Neon API token, production DB
 URL or production privileges. Keep demo and SaaS in separate Neon projects; do not branch from
 production data. Merely renaming a database in a production project is not this isolation model.
 
@@ -49,10 +49,10 @@ current paid compute plan, domain and certificate. Do not run `neon-init.sql` ag
    checks migration history, runs migrations and installs permissions/marker/functions. It does
    not execute cleanup and does not need a password or LOGIN on the owner role.
 4. The account owner securely sets the two operational role passwords and enters each direct
-   verified-TLS connection in its corresponding Render service. The migration owner can remain
+   verified-TLS connection in Render (runtime) or GitHub Secrets (cleanup). The migration owner can remain
    NOLOGIN when migrations are run via the managed admin's explicit SET ROLE.
 5. Keep the old Render connection active until replacement permissions are verified. Update the
-   existing service and add cleanup cron; no project, domain, certificate or paid web-plan migration
+   existing service and configure the GitHub cleanup workflow; no project, domain, certificate or paid web-plan migration
    is needed. Enable the daily-reset schedule only after reviewing its destructive scope.
 
 The initial-install instructions below apply only to a genuinely new empty project.
@@ -93,7 +93,7 @@ npm run db:prepare:public
 This executes `SET ROLE borecount_demo_owner` on the same connection used for migration history,
 Drizzle migrations and permission installation. It then revokes PUBLIC schema/function access,
 grants runtime workflows, and installs the marker/admission history/restricted reset functions.
-It is operator-only: **do not put either admin or owner URL in Render web/cron settings**. Role
+It is operator-only: **do not put either admin or owner URL in Render web or GitHub cleanup settings**. Role
 setup intentionally fails if roles/database already exist; review an existing installation rather
 than adopting it or resetting it silently. Preparation is idempotent and does not postpone reset.
 A DB initialized before the 0.8.0 squashed baseline requires reviewed migration or intentional
@@ -101,7 +101,7 @@ replacement of the disposable installation, not blind replay.
 
 ## Configure and release on Render
 
-Use `render.yaml` to configure our existing `borecount-demo` and `borecount-demo-cleanup` cron.
+Use `render.yaml` to configure our existing `borecount-demo`. No paid Render cron service is needed.
 Blueprint service names can match existing services; review that mapping before applying. For
 existing Blueprints, add new `sync: false` secrets manually—Render prompts only on initial creation.
 See [Blueprint configuration](https://render.com/docs/blueprint-spec).
@@ -116,20 +116,38 @@ Web settings:
 - `VITE_PUBLIC_URL=https://borecount.dev/` (build input), `/ready` health check, one instance,
   0.5 CPU / 512 MiB service plan, 30-second shutdown allowance.
 
-Cron settings: same reviewed code release, `Dockerfile.cleanup`, own cleanup URL, UTC schedule
-`*/5 * * * *`. The image runs once and exits; its total deadline is 45 seconds. Render's cron has
-no persistent disk requirement. See [Render cron](https://render.com/docs/cronjobs).
+Cleanup settings in GitHub repository **Settings → Secrets and variables → Actions**:
+
+1. Add Actions secret `PUBLIC_DEMO_CLEANUP_DATABASE_URL`: direct verified-TLS URL as
+   `borecount_demo_cleanup`, never an admin/runtime URL.
+2. Review that the daily reset deletes all disposable financial/session data and invalidates
+   active sessions. After approval, set Actions variable `PUBLIC_DEMO_CLEANUP_ENABLED=true`.
+3. Merge `.github/workflows/public-cleanup.yml` into `main`. It runs only on main, with a
+   read-only repository token, serialized runs, locked production dependencies, and a 45-second
+   database script deadline. The job has a five-minute timeout and never runs on pull requests.
+4. Use **Actions → Public demo cleanup → Run workflow** on main for the first approved run.
+   If the persisted deadline is due, this immediately resets the demo. Check the sanitized result
+   and the new deadline; do not invoke it merely as a connectivity probe.
+
+The requested UTC schedule is `2-59/5 * * * *`, avoiding the start of the hour. GitHub may delay
+or drop scheduled jobs under load, and disables schedules in inactive public repositories after
+60 days. This is a best-effort demo scheduler: the existing 15-minute overdue guard still fails
+closed, so delays can make the demo unavailable until cleanup succeeds. Monitor failures and
+schedule activity, and run manually if necessary. See [GitHub schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+Standard runners are free for this public repository; Neon queries still consume its compute
+allowance. See [Actions billing](https://docs.github.com/en/actions/concepts/billing-and-usage).
 
 Remove any inherited owner/admin/production URL from the existing web service: Blueprint omission
 **does not remove old environment variables**. No public startup migrations run. Prepare the DB
-with the owner separately, then deploy the web and cron from the same SHA. Both are manual deploys
-(`autoDeployTrigger: off`) to prevent an uncoordinated schema/cleanup rollout.
+with the owner separately, then deploy the reviewed web SHA. Web deployment remains manual
+(`autoDeployTrigger: off`). Cleanup runs the current main revision; review SQL/function compatibility
+before merging future cleanup changes and record both revisions in rollout evidence.
 
 `Verify host` checks unit/contracts/schema/types/build, real PostgreSQL workflows, Chromium and the
 restricted public-host lifecycle. `Build Render demo release` requires those checks, then builds
-matching SHA-tagged web/cron images and records their digests as `public-release.txt`. Render can
-build the Dockerfiles from the same selected Git SHA; alternatively configure image-based services
-with those exact digests. Record SHA, digests, migration journal, package/contract versions and time.
+matching SHA-tagged web/portable-cleanup images and records their digests as `public-release.txt`. Render can
+build the web Dockerfile from the selected Git SHA; the portable cleanup image remains available
+for another scheduler, while GitHub Actions runs the script directly. Record SHA, digests, migration journal, package/contract versions and time.
 No `latest` application tag is used. `/guides/release.json` contains the build's SHA (`RELEASE_SHA`
 or Render's `RENDER_GIT_COMMIT`) and coordinated package/contract version `0.8.0`. Published guides preserve the source
 `README.md`, `ARCHITECTURE.md`, `docs/` and `openapi/` tree so their relative links resolve.
@@ -162,7 +180,7 @@ rolls back its admission row. Only entries older than one hour are pruned. Per-I
 REST/Library quotas, a 1 MiB body cap, report concurrency 2/global and 1/tenant, database role query/
 lock timeouts and the 5-connection pool also apply. See [OPERATIONS.md](OPERATIONS.md).
 
-Every five minutes cron calls one fixed-target function. Once the persisted 24-hour deadline is
+The GitHub workflow requests a run every five minutes and calls one fixed-target function. Once the persisted 24-hour deadline is
 due, it atomically truncates **all reviewed financial/session tables of this disposable installation**.
 This is whole-demo reset, not deletion of a customer's immutable tenant history. The function uses
 a fixed search path and explicit tables; it never disables triggers or uses CASCADE. Marker and
@@ -171,7 +189,7 @@ non-SERVICE credentials fail closed. Cleanup has no direct table, schema, role-m
 TRUNCATE permission and no production credentials. Old keys/tokens cease working after reset.
 
 The reset may briefly lock tables/end active sessions. Failure retries at the next scheduled run;
-readiness fails if the reset deadline is more than 15 minutes overdue. Render cron failures and web
+readiness fails if the reset deadline is more than 15 minutes overdue. GitHub cleanup failures and web
 readiness must notify our operator. Cleanup errors report only an allowlisted SQLSTATE/application
 code and static reason category (for example `P1303` / `non_sandbox_data`, `P1304` / `schema_drift`,
 `42501` / `permission`, `55P03` / `lock_timeout`), never raw messages, queries or credentials.
@@ -191,18 +209,18 @@ Full smoke creates two disposable sessions and verifies HTTPS probes, versioned 
 Secure cookies, SERVICE admin denial, cross-tenant denial, balanced posting, identical retry,
 conflicting retry, final balance and cross-site rejection. It logs only check/release identifiers;
 it never sends pilot email. Read-only monitoring also checks `GET /demo/availability`, which
-returns 503 if retained-tenant or rolling-hour capacity is exhausted or cleanup is overdue, even
-when `/ready` still reports database health. The probe creates/reserves no sandbox and consumes
-no creation quota. It is a current capacity snapshot, not a reservation for a future request.
+returns 503 if retained-tenant or rolling-hour capacity is exhausted, even when `/ready` remains
+healthy. Both endpoints also fail when cleanup is more than 15 minutes overdue. The probe
+creates/reserves no sandbox and consumes no creation quota. It is a current capacity snapshot, not a reservation for a future request.
 
 Set repository variable `PUBLIC_DEMO_URL` to enable the 15-minute **Public demo availability**
-workflow. Enable operator GitHub Actions failure notifications and Render web/cron deploy/run
+workflow. Enable operator GitHub Actions failure notifications for monitoring/cleanup and Render web deploy
 notifications. A missing URL deliberately disables network checks. Verify actual notification
 delivery; repository configuration alone does not establish an operating alert channel.
 
 Render's `/ready` HTTP health checks gate deployment and restart unhealthy web instances; the
 entrypoint exits if either nginx or API stops. See [Render health checks](https://render.com/docs/health-checks).
-Cron and database incidents need separate investigation. Monitor 5xx, p95 latency, 429s, OOM/CPU,
+Scheduler and database incidents need separate investigation. Monitor 5xx, p95 latency, 429s, OOM/CPU,
 Neon connections/size/storage, cleanup failures and certificate expiry. Initial thresholds: sustained
 5xx >1%, p95 >2 seconds, memory >80%, storage >75% of budget or repeated reset failures. Tune from
 real measurements. Readiness checks/monitoring can keep Neon compute awake; budget that idle cost.
@@ -220,7 +238,7 @@ Initial planning envelope, to be reconciled with our actual account before publi
 | Resource | Budget |
 | --- | --- |
 | Render web | One 0.5-CPU / 512-MiB instance continuously; 365 vCPU-hours and 365 GiB-hours at 730 hours |
-| Render cron | 8640 starts/30 days; aim <5 seconds each, 12 active hours/month; minimum charge applies |
+| GitHub cleanup | Up to 8640 scheduled jobs/30 days; standard runners free for this public repo; no separate Render cron charge |
 | Neon compute | Separate PostgreSQL 16 project, initial 0.25-CU floor / 0.5-CU ceiling; up to 182.5 CU-hours/month at floor if kept awake |
 | Neon logical data | 1 GiB initial alert budget, plus separately measured retained history/WAL |
 | Egress | 10 GiB/month initial budget across Render/Neon; measure actual use |
@@ -242,9 +260,9 @@ Local tests cover real PostgreSQL non-owner workflows/RLS, admission/concurrent 
 restricted cleanup, non-sandbox/schema refusal, inaccessible canary and old-token invalidation;
 Chromium covers landing → release guides → transaction → pilot link. Container tests cover nginx
 request/forwarding boundaries and Render entrypoint. They do **not** prove a Neon account's grants,
-Render scheduler, live certificate, DNS/Cloudflare configuration, alerts or actual monthly bill.
+GitHub scheduler, live certificate, DNS/Cloudflare configuration, alerts or actual monthly bill.
 
-Before closing LL-133, record sanitized project/service IDs, same-SHA web/cron deployments, direct
+Before closing LL-133, record sanitized project/service IDs, reviewed web/cleanup revisions, direct
 Neon role/security checks, real HTTPS smoke, fresh private-browser path, a scheduled reset,
 notification delivery, recovery and idle resource/cost measurements. Live operations require access
 to our Render/Neon accounts; local CI alone is insufficient evidence.

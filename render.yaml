@@ -44,14 +44,3 @@ services:
         value: "1"
       - key: VITE_PUBLIC_URL
         value: https://borecount.dev/
-  - type: cron
-    name: borecount-demo-cleanup
-    runtime: docker
-    dockerfilePath: ./Dockerfile.cleanup
-    region: frankfurt
-    plan: 0.5c-512mb
-    schedule: "*/5 * * * *" # UTC; reset only when the 24-hour deadline is due
-    autoDeployTrigger: off
-    envVars:
-      - key: DATABASE_URL
-        sync: false # Direct Neon connection as borecount_demo_cleanup ONLY

@@ -1,4 +1,4 @@
-// Render Cron Job: one bounded run, no HTTP listener, no owner/production credential.
+// Scheduled cleanup: one bounded run, no HTTP listener, no owner/production credential.
 import postgres from 'postgres';
 import { safeDatabaseFailure } from './safe-db-error.mjs';
 let target;

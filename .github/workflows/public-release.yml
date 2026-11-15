@@ -30,7 +30,7 @@ jobs:
             RELEASE_SHA=${{ github.sha }}
             VITE_PUBLIC_URL=${{ vars.PUBLIC_DEMO_URL || 'https://borecount.dev/' }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
-      - name: Build cleanup cron
+      - name: Build portable cleanup image
         id: cleanup
         uses: docker/build-push-action@v6
         with:
