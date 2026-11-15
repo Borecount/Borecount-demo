@@ -1,0 +1,26 @@
+name: Public demo cleanup
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-demo-cleanup
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main' && vars.PUBLIC_DEMO_CLEANUP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked production dependencies
+        run: npm ci --omit=dev --workspace=@borecount/demo-api --include-workspace-root=false --ignore-scripts
+      - name: Check daily reset deadline and clean disposable demo when due
+        env:
+          DATABASE_URL: ${{ secrets.PUBLIC_DEMO_CLEANUP_DATABASE_URL }}
+        run: node scripts/public-demo-cleanup.mjs --once

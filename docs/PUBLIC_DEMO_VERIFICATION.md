@@ -63,6 +63,18 @@ fields; generated README/architecture/docs/OpenAPI relative links resolve both l
 the Render image. The complete npm test pipeline, both PostgreSQL public-host variants, 19 unit
 and 20 browser tests, Render/cleanup builds and real nginx image tests passed.
 
-These review fixes were NOT applied to the live Neon or Render configuration. Before deploying
-the revised PUBLIC_DEMO profile, rerun db:prepare:public with the managed-admin connection to
-install/backfill the persistent admission history and updated functions without resetting data.
+The reviewed SQL was applied through Neon Console on 2026-11-15 with user approval. All four
+migration hashes matched the release. Admission history and updated functions committed, with
+25 tenants/sessions preserved and two recent admissions backfilled. Runtime claim permission,
+cleanup-only reset execution, denied direct cleanup TRUNCATE and enabled account RLS were checked.
+Availability was true; the existing reset deadline was unchanged and reset was not invoked.
+The user confirmed runtime/cleanup authentication works. Administrator SET ROLE into those two
+roles is denied; no extra memberships were granted to bypass that boundary.
+
+## GitHub cleanup scheduler
+
+Cleanup now uses the opt-in main-only `Public demo cleanup` Actions workflow instead of a paid
+Render cron. It retains the existing role and reset function, runs serially, and keeps the
+15-minute overdue guard. GitHub schedule delays can therefore cause a fail-closed outage.
+Live secret installation, explicit schedule activation, first approved reset and notification
+verification remain rollout steps; adding the workflow alone does not establish live cleanup.
