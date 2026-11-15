@@ -8,7 +8,7 @@ test('fresh visitor finds test-data notice, free release guides, a posting and m
   await expect(page.getByRole('link', { name: 'API docs ↗' })).toHaveAttribute('href', '/docs?demo=1');
   await page.getByRole('link', { name: 'Guides', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Free evaluation and self-hosting guides' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'PUBLIC DEMO', exact: true })).toHaveAttribute('href', 'PUBLIC_DEMO.md');
+  await expect(page.getByRole('link', { name: 'PUBLIC DEMO', exact: true })).toHaveAttribute('href', 'docs/PUBLIC_DEMO.md');
   const release = await (await page.request.get('/guides/release.json')).json();
   expect(release.packages).toBe('0.8.0');
   expect(release.revision).toMatch(/^[a-f0-9]{40}$/);

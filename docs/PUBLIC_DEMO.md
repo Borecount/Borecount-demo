@@ -44,8 +44,10 @@ current paid compute plan, domain and certificate. Do not run `neon-init.sql` ag
    initially passwordless roles, transfers only the existing public/drizzle application objects,
    and sets query/lock timeouts. It does not create/reset a database or delete financial data.
    If a lock/schema/identity guard fails, the transaction rolls back; investigate rather than reset.
-3. In the same SQL session, run `SET ROLE borecount_demo_owner`, then `prepare.sql`, then
-   `RESET ROLE`. This installs permissions/marker/functions; it does not execute cleanup.
+3. Set `DATABASE_URL` securely to the managed-admin direct connection and run
+   `npm run db:prepare:public`. The tool uses one connection, executes `SET ROLE borecount_demo_owner`,
+   checks migration history, runs migrations and installs permissions/marker/functions. It does
+   not execute cleanup and does not need a password or LOGIN on the owner role.
 4. The account owner securely sets the two operational role passwords and enters each direct
    verified-TLS connection in its corresponding Render service. The migration owner can remain
    NOLOGIN when migrations are run via the managed admin's explicit SET ROLE.
@@ -80,16 +82,18 @@ This verifies the certificate/hostname instead of merely requesting encryption. 
 and cleanup on direct connections; pooled/session behavior is outside this profile's validation.
 See [Neon pooling limits](https://neon.com/docs/connect/connection-pooling).
 
-From the exact host release, set `DATABASE_URL` securely to the owner URL and run:
+From the exact host release, set `DATABASE_URL` securely to a managed admin allowed to
+`SET ROLE borecount_demo_owner` (or a direct owner login for a new installation) and run:
 
 ```sh
 npm ci
 npm run db:prepare:public
 ```
 
-This verifies migration history, migrates, revokes PUBLIC schema/function access, grants runtime
-financial workflow permissions, and installs the immutable-purpose marker and restricted reset
-function. It is operator-only: **do not put the owner URL in Render web/cron settings**. Role
+This executes `SET ROLE borecount_demo_owner` on the same connection used for migration history,
+Drizzle migrations and permission installation. It then revokes PUBLIC schema/function access,
+grants runtime workflows, and installs the marker/admission history/restricted reset functions.
+It is operator-only: **do not put either admin or owner URL in Render web/cron settings**. Role
 setup intentionally fails if roles/database already exist; review an existing installation rather
 than adopting it or resetting it silently. Preparation is idempotent and does not postpone reset.
 A DB initialized before the 0.8.0 squashed baseline requires reviewed migration or intentional
@@ -127,7 +131,8 @@ matching SHA-tagged web/cron images and records their digests as `public-release
 build the Dockerfiles from the same selected Git SHA; alternatively configure image-based services
 with those exact digests. Record SHA, digests, migration journal, package/contract versions and time.
 No `latest` application tag is used. `/guides/release.json` contains the build's SHA (`RELEASE_SHA`
-or Render's `RENDER_GIT_COMMIT`) and coordinated package/contract version `0.8.0`.
+or Render's `RENDER_GIT_COMMIT`) and coordinated package/contract version `0.8.0`. Published guides preserve the source
+`README.md`, `ARCHITECTURE.md`, `docs/` and `openapi/` tree so their relative links resolve.
 
 ## Domain, HTTPS and trusted ingress
 
@@ -148,9 +153,12 @@ Render/Neon platform logs and their retention need their own operator privacy se
 ## Sandbox admission and cleanup
 
 Seeding uses released provisioning APIs and one atomic transaction: exactly two ledgers/currencies,
-twelve accounts and two opening postings. Database-serialized admission permits at most 60 creates
-per hour and 500 retained sandbox tenants. Competing seeds return 429 with one-second retry;
-capacity rejection creates no tenant. Admission survives API restarts. Per-IP and authenticated
+twelve accounts and two opening postings. Only the `PUBLIC_DEMO=true` profile uses the durable
+database-serialized admission policy: at most 60 creates in a rolling hour and 500 retained tenants.
+Private/local profiles do not apply these lifetime/hourly caps because they have no scheduled reset. Competing seeds return 429 with one-second retry;
+capacity rejection creates no tenant. Admission history lives in `demo_ops.sandbox_admissions`,
+separate from disposable sessions; it survives both API restarts and daily reset. A failed seed
+rolls back its admission row. Only entries older than one hour are pruned. Per-IP and authenticated
 REST/Library quotas, a 1 MiB body cap, report concurrency 2/global and 1/tenant, database role query/
 lock timeouts and the 5-connection pool also apply. See [OPERATIONS.md](OPERATIONS.md).
 
@@ -158,13 +166,16 @@ Every five minutes cron calls one fixed-target function. Once the persisted 24-h
 due, it atomically truncates **all reviewed financial/session tables of this disposable installation**.
 This is whole-demo reset, not deletion of a customer's immutable tenant history. The function uses
 a fixed search path and explicit tables; it never disables triggers or uses CASCADE. Marker and
-migration history survive. Unexpected tables, foreign dependencies, non-sandbox tenants or
+migration and rolling-hour admission history survive. Unexpected tables, foreign dependencies, non-sandbox tenants or
 non-SERVICE credentials fail closed. Cleanup has no direct table, schema, role-management or
 TRUNCATE permission and no production credentials. Old keys/tokens cease working after reset.
 
 The reset may briefly lock tables/end active sessions. Failure retries at the next scheduled run;
 readiness fails if the reset deadline is more than 15 minutes overdue. Render cron failures and web
-readiness must notify our operator. Database admission limits do not bound exact storage bytes:
+readiness must notify our operator. Cleanup errors report only an allowlisted SQLSTATE/application
+code and static reason category (for example `P1303` / `non_sandbox_data`, `P1304` / `schema_drift`,
+`42501` / `permission`, `55P03` / `lock_timeout`), never raw messages, queries or credentials.
+Database admission limits do not bound exact storage bytes:
 monitor Neon database growth and WAL/history-retention usage; logical reset does not remove the
 provider's retained backup/history immediately. No real data is permitted in this environment.
 
@@ -179,7 +190,10 @@ npm run monitor:public
 Full smoke creates two disposable sessions and verifies HTTPS probes, versioned docs/contract,
 Secure cookies, SERVICE admin denial, cross-tenant denial, balanced posting, identical retry,
 conflicting retry, final balance and cross-site rejection. It logs only check/release identifiers;
-it never sends pilot email. Read-only monitoring creates no sessions.
+it never sends pilot email. Read-only monitoring also checks `GET /demo/availability`, which
+returns 503 if retained-tenant or rolling-hour capacity is exhausted or cleanup is overdue, even
+when `/ready` still reports database health. The probe creates/reserves no sandbox and consumes
+no creation quota. It is a current capacity snapshot, not a reservation for a future request.
 
 Set repository variable `PUBLIC_DEMO_URL` to enable the 15-minute **Public demo availability**
 workflow. Enable operator GitHub Actions failure notifications and Render web/cron deploy/run

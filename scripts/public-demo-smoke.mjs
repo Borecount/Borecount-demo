@@ -14,6 +14,8 @@ try {
   };
   step = 'health/readiness';
   for (const path of ['/health', '/ready']) assert.deepEqual(await (await get(path)).json(), { ok: true });
+  step = 'sandbox admission availability';
+  assert.deepEqual(await (await get('/demo/availability')).json(), { ok: true });
   step = 'versioned guides and contract';
   const release = await (await get('/guides/release.json')).json();
   assert.match(release.revision, /^[a-f0-9]{40}$/);
@@ -24,7 +26,7 @@ try {
   assert.equal(release.packages, release.contract);
   const guides = await (await get('/guides/')).text();
   assert.ok(guides.includes('PUBLIC_DEMO.md'));
-  await get('/guides/PUBLIC_DEMO.md');
+  await get('/guides/docs/PUBLIC_DEMO.md');
   await get('/docs');
   await get('/metrics', {}, 404);
   step = 'landing page';

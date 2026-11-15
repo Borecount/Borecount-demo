@@ -70,18 +70,25 @@ try {
       await cluster.unsafe(await readFile('deploy/public/neon-upgrade.sql', 'utf8'));
       assert.deepEqual(await cluster`select id, balance_minor::text from accounts order by id`, balances);
       assert.deepEqual(await cluster`select id, reference from transactions order by id`, history);
-      for (const [name, password] of Object.entries(passwords)) {
+      for (const [name, password] of Object.entries(passwords).filter(([name]) => name !== 'owner')) {
         // Test fixtures only. Live password entry is performed by the account owner.
         await cluster.unsafe(`ALTER ROLE borecount_demo_${name} LOGIN PASSWORD '${password}'`);
       }
     }
   } finally { await cluster.end({ timeout: 5 }); }
-  owner = postgres(migrateUrl, { max: 1, onnotice: () => {} });
-  const setup = (await readFile('deploy/public/prepare.sql', 'utf8')).replace(/^\\set.*$/gm, '');
-  await owner.unsafe(setup);
+  const releaseUrl = upgrading ? legacyUrl : migrateUrl;
+  const prepare = () => spawnSync(process.execPath, ['scripts/prepare-public-demo.mjs'], {
+    env: { ...process.env, DATABASE_URL: releaseUrl }, stdio: 'pipe',
+  });
+  const prepared = prepare();
+  assert.equal(prepared.status, 0, prepared.stderr.toString());
+  owner = postgres(releaseUrl, { max: 1, onnotice: () => {} });
+  await owner.unsafe('SET ROLE borecount_demo_owner');
+  if (upgrading) assert.equal((await owner`select rolcanlogin from pg_roles where rolname = 'borecount_demo_owner'`)[0].rolcanlogin, false, 'Managed admin SET ROLE supports a NOLOGIN owner');
   // Releasing an unchanged profile is idempotent and must not postpone the retention deadline.
   const before = await owner`select next_reset_at from demo_ops.state`;
-  await owner.unsafe(setup);
+  const repeated = prepare();
+  assert.equal(repeated.status, 0, repeated.stderr.toString());
   assert.deepEqual(await owner`select next_reset_at from demo_ops.state`, before);
   runtime = createDbClient({ databaseUrl: url('luxledger_demo_hosted', 'borecount_demo_runtime', passwords.runtime) });
   cleanup = postgres(url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup), { max: 1 });
@@ -101,18 +108,23 @@ try {
   const protection = new HostProtection();
   server = createServerCore({ logger: false, readinessCheck: async () => { await runtime.sql`select 1`; } });
   registerApplication(server, { services, jwtAuth, protection, authorizeAdjustment: false });
-  process.env.SANDBOX_MAX_TENANTS = upgrading ? '3' : '2';
-  registerSandbox(server, runtime, services, jwtAuth, { protection, specification: canonicalOpenApi });
-  delete process.env.SANDBOX_MAX_TENANTS;
+  const publicLimits = { maxTenants: upgrading ? 3 : 2, hourlyCreates: upgrading ? 3 : 2 };
+  registerSandbox(server, runtime, services, jwtAuth, { protection, specification: canonicalOpenApi }, publicLimits);
   const start = () => server.inject({ method: 'POST', url: '/demo/session', headers: { host: 'demo.test', origin: 'https://demo.test' } });
   const expect = (response, status) => { assert.equal(response.statusCode, status, response.body); return response.json(); };
+  const admissions = async () => [...await owner`select * from demo_ops.sandbox_admissions order by tenant_id`];
+  const availabilityBefore = await admissions();
+  for (let i = 0; i < 3; i++) expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 200);
+  assert.deepEqual(await admissions(), availabilityBefore, 'Availability must not consume admission quota');
   const first = expect(await start(), 201);
   const second = expect(await start(), 201);
   const rest = (path, identity = first, payload) => server.inject({ method: payload ? 'POST' : 'GET', url: path, headers: { authorization: `Bearer ${identity.access_token}` }, ...(payload ? { payload } : {}) });
   const ledger = expect(await rest('/v1/ledgers'), 200).data[0];
   expect(await rest(`/v1/ledgers/${ledger.id}`, second), 404);
   expect(await start(), 429);
-  await assert.rejects(() => runtime.runTx('hourly-cap', tx => assertSandboxCapacity(tx, { maxTenants: 3, hourlyCreates: 2 })), error => error.code === 'RATE_LIMIT_EXCEEDED');
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 200);
+  expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 503);
+  await assert.rejects(() => runtime.runTx('hourly-cap', tx => assertSandboxCapacity(tx, { maxTenants: 4, hourlyCreates: 2 }, '00000000-0000-4000-8000-000000000134')), error => error.code === 'RATE_LIMIT_EXCEEDED');
   await owner.begin(async tx => {
     await tx`select pg_advisory_xact_lock(133132)`;
     expect(await start(), 429);
@@ -120,6 +132,18 @@ try {
   const [{ n }] = await runtime.sql`select count(*)::int as n from tenants`;
   assert.equal(n, upgrading ? 3 : 2, 'Rejected seed must not leave a tenant');
   assert.equal((await runtime.sql`select * from accounts`).length, 0, 'Raw runtime queries cannot bypass tenant RLS');
+  await assert.rejects(() => runtime.sql`delete from demo_ops.sandbox_admissions`);
+  // The same DB is full under public policy; private/local hosts must still provision normally.
+  const privateHost = createServerCore({ logger: false, readinessCheck: async () => {} });
+  const privateProtection = new HostProtection();
+  registerApplication(privateHost, { services, jwtAuth, protection: privateProtection, authorizeAdjustment: false });
+  registerSandbox(privateHost, runtime, services, jwtAuth, { protection: privateProtection, specification: canonicalOpenApi });
+  const quotaBeforePrivate = await admissions();
+  try {
+    expect(await privateHost.inject({ method: 'GET', url: '/demo/availability' }), 404);
+    expect(await privateHost.inject({ method: 'POST', url: '/demo/session', headers: { host: 'demo.test', origin: 'https://demo.test' } }), 201);
+  } finally { await privateHost.close(); }
+  assert.deepEqual(await admissions(), quotaBeforePrivate, 'Private provisioning does not consume public quota');
   const accounts = expect(await rest(`/v1/accounts?ledger_id=${ledger.id}`), 200).data;
   const body = { ledger_id: ledger.id, reference: 'public-profile-posting', currency: 'USD', entries: [
     { account_id: accounts.find(a => a.code === 'DEMO_PRIMARY').id, signed_amount_minor: '100', currency: 'USD' },
@@ -132,12 +156,21 @@ try {
   await owner`insert into tenants (id, name) values ('00000000-0000-4000-8000-000000000133', 'Do not reset')`;
   await owner`update demo_ops.state set next_reset_at = now() - interval '1 second'`;
   await assert.rejects(() => cleanup`select demo_ops.cleanup_due()`);
+  const refusedWorker = spawnSync(process.execPath, ['scripts/public-demo-cleanup.mjs'], {
+    env: { ...process.env, DATABASE_URL: url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup) }, stdio: 'pipe',
+  });
+  assert.equal(refusedWorker.status, 1);
+  const safeFailure = JSON.parse(refusedWorker.stderr.toString());
+  assert.equal(safeFailure.code, 'P1303');
+  assert.equal(safeFailure.category, 'non_sandbox_data');
+  assert.deepEqual(Object.keys(safeFailure).sort(), ['at', 'category', 'code', 'event']);
   expect(await rest('/v1/ledgers'), 200);
   await owner`delete from tenants where id = '00000000-0000-4000-8000-000000000133'`;
   await owner`create table public.unreviewed_data (id int)`;
   await assert.rejects(() => cleanup`select demo_ops.cleanup_due()`);
   await owner`drop table public.unreviewed_data`;
-  // Real ledger+session data is reset atomically, without disabling any financial triggers.
+  // Real ledger+session data is reset atomically; the rolling-hour admission budget survives it.
+  const quotaBeforeReset = await admissions();
   const worker = spawnSync('node', ['scripts/public-demo-cleanup.mjs', '--once'], {
     env: { ...process.env, DATABASE_URL: url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup) }, stdio: 'pipe',
   });
@@ -145,12 +178,19 @@ try {
   assert.match(worker.stdout.toString(), /sandbox_database_reset/);
   assert.equal((await owner`select count(*)::int as n from tenants`)[0].n, 0);
   assert.equal((await owner`select count(*)::int as n from demo_sessions`)[0].n, 0);
+  assert.deepEqual(await admissions(), quotaBeforeReset, 'Daily reset must not reset the rolling-hour quota');
   expect(await rest('/v1/ledgers'), 401);
+  expect(await start(), 429);
+  expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 503);
+  // Once the original hour expires, availability recovers without consuming anything.
+  await owner`update demo_ops.sandbox_admissions set admitted_at = statement_timestamp() - interval '1 hour 1 second'`;
+  const expiredQuota = await admissions();
+  expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 200);
+  assert.deepEqual(await admissions(), expiredQuota);
   expect(await start(), 201);
   assert.deepEqual([...await canary`select value from private_canary`], [{ value: 'untouched' }]);
   console.log((upgrading ? 'Existing demo upgrade preserved balances/history. ' : '') + 'Public host passed: unprivileged migration/runtime, RLS, seed cap, posting/retry, fixed-target cleanup, token invalidation, non-sandbox refusal and inaccessible canary');
 } finally {
-  delete process.env.SANDBOX_MAX_TENANTS;
   await server?.close();
   await Promise.all([owner?.end({ timeout: 5 }), runtime?.sql.end({ timeout: 5 }), cleanup?.end({ timeout: 5 }), canary?.end({ timeout: 5 })]);
   for (const database of created.reverse()) await admin.unsafe(`DROP DATABASE ${database} WITH (FORCE)`);

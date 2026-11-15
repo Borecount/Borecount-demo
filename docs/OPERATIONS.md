@@ -158,8 +158,11 @@ The separate [public profile](PUBLIC_DEMO.md) adds a separate Neon project, non-
 restricted Render cleanup cron, daily disposable-installation reset, managed HTTPS and service limits.
 `PUBLIC_DEMO=true` requires that profile's database/role/marker and rejects overdue cleanup at readiness.
 `SANDBOX_MAX_TENANTS` (default 500, range 1–10000) and `SANDBOX_HOURLY_CREATES` (60, range 1–1000)
-bound successful sandbox provisioning in every profile through serialized database admission.
-Admission saturation returns 429 before tenant creation. Cleanup applies only to the public profile;
+bound successful provisioning only when `PUBLIC_DEMO=true`, through serialized database admission.
+The rolling-hour history is stored outside disposable sessions and survives reset. Local/private
+profiles do not apply these persistent caps. `GET /demo/availability` is public-profile-only: a
+non-consuming snapshot returning 503 for exhausted capacity or overdue cleanup. Admission saturation
+returns 429 before tenant creation. Cleanup applies only to the public profile;
 local/private histories remain retained.
 
 ## Private sandbox lifecycle

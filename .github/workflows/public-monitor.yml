@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Verify evaluation path
+      - name: Check readiness, sandbox admission and versioned guides
         env:
           PUBLIC_DEMO_URL: ${{ vars.PUBLIC_DEMO_URL }}
           FULL_SMOKE: ${{ inputs.full_smoke }}

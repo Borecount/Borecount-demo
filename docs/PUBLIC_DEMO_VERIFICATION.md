@@ -7,7 +7,7 @@ integration → all 20 E2E tests passed sequentially with explicit port-release 
 
 | Check | Result |
 | --- | --- |
-| Unit tests | 17 passed |
+| Unit tests | 19 passed |
 | Real PostgreSQL integration | Passed: sandbox 99 HTTP requests, Library workflows, mixed-mode quotas, retries, rollback, isolation and expiry |
 | Chromium | 20 passed, including landing → release guides → posting → pilot contact link |
 | Public-host PostgreSQL test | Fresh setup and existing-installation upgrade passed using a separate temporary PostgreSQL 16 cluster; prior opening balances/history preserved |
@@ -43,3 +43,26 @@ schema ownership before transferring tables and now runs in tests under a NOSUPE
 The corrected transaction committed successfully in Neon: three service roles exist, application
 objects belong to borecount_demo_owner, and the 17/17/34 counts remain. Passwords were not set.
 Runtime grants, cleanup installation/scheduling and Render credential rollout remain separate steps.
+
+Live Neon runtime/cleanup permissions were then installed and committed with user approval.
+Metadata checks confirmed: runtime can read accounts but cannot TRUNCATE, CREATE in public,
+bypass RLS or execute cleanup; cleanup cannot read/TRUNCATE accounts or CREATE in public and
+can execute only the restricted reset/status functions. Account RLS remains enabled and the
+17 tenant / 17 session / 34 posting counts are unchanged. The reset function was not invoked;
+cron was not configured or started. Credential setup and Render rollout still require completion.
+
+## Review regression checks
+
+All six review findings are covered in the updated implementation and local tests:
+private/local provisioning ignores public persistent caps; the same DB can reject public admission
+while private provisioning succeeds; the operator CLI uses a managed admin's SET ROLE with a
+NOLOGIN owner; rolling-hour admission history survives whole-demo reset and recovers only when
+that hour expires; repeated availability probes leave admission history unchanged and return 503
+on exhausted capacity while readiness remains 200; cleanup logs only allowlisted code/category
+fields; generated README/architecture/docs/OpenAPI relative links resolve both locally and inside
+the Render image. The complete npm test pipeline, both PostgreSQL public-host variants, 19 unit
+and 20 browser tests, Render/cleanup builds and real nginx image tests passed.
+
+These review fixes were NOT applied to the live Neon or Render configuration. Before deploying
+the revised PUBLIC_DEMO profile, rerun db:prepare:public with the managed-admin connection to
+install/backfill the persistent admission history and updated functions without resetting data.

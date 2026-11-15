@@ -30,11 +30,12 @@ export async function assertPublicHost(db: DbClient, databaseUrl?: string) {
     exists (select 1 from pg_tables where schemaname in ('public', 'demo_ops') and tableowner = current_user) as owns_tables,
     has_schema_privilege(current_user, 'public', 'CREATE') as can_create,
     has_table_privilege(current_user, 'public.demo_sessions', 'TRUNCATE') as can_truncate,
-    has_function_privilege(current_user, 'demo_ops.cleanup_due()', 'EXECUTE') as can_cleanup
+    has_function_privilege(current_user, 'demo_ops.cleanup_due()', 'EXECUTE') as can_cleanup,
+    has_function_privilege(current_user, 'demo_ops.claim_sandbox(uuid,integer,integer)', 'EXECUTE') as can_claim
     from pg_roles where rolname = current_user`;
   if (identity?.database !== 'luxledger_demo_hosted' || identity.role !== 'borecount_demo_runtime' ||
       identity.rolsuper || identity.rolbypassrls || identity.rolcreatedb || identity.rolcreaterole ||
-      identity.member_of_role || identity.owns_tables || identity.can_create || identity.can_truncate || identity.can_cleanup) {
+      identity.member_of_role || identity.owns_tables || identity.can_create || identity.can_truncate || identity.can_cleanup || !identity.can_claim) {
     throw new Error('Public demo requires its dedicated unprivileged runtime and database');
   }
   const [marker] = await db.sql`select demo_ops.public_status() as status`;
@@ -43,12 +44,14 @@ export async function assertPublicHost(db: DbClient, databaseUrl?: string) {
   }
 }
 
-export async function assertSandboxCapacity(tx: UnitOfWorkContext['tx'], limits: ReturnType<typeof parseSandboxLimits>) {
-  const [lock] = await tx.execute<{ acquired: boolean }>(sql`select pg_try_advisory_xact_lock(${SANDBOX_LIFECYCLE_LOCK}) as acquired`);
-  if (!lock?.acquired) throw new RateLimitExceededError(1);
-  const [counts] = await tx.execute<{ total: number; recent: number }>(sql`select count(*)::int as total,
-    count(*) filter (where created_at > now() - interval '1 hour')::int as recent from demo_sessions`);
-  if (counts.total >= limits.maxTenants || counts.recent >= limits.hourlyCreates) {
-    throw new RateLimitExceededError(60);
-  }
+export async function assertSandboxCapacity(tx: UnitOfWorkContext['tx'], limits: ReturnType<typeof parseSandboxLimits>, tenantId: string) {
+  const [claim] = await tx.execute<{ retry_after: number }>(sql`select
+    demo_ops.claim_sandbox(${tenantId}::uuid, ${limits.maxTenants}, ${limits.hourlyCreates}) as retry_after`);
+  if (claim.retry_after > 0) throw new RateLimitExceededError(claim.retry_after);
+}
+
+/** Snapshot only: no admission row, lock, seed or quota reservation is created. */
+export async function sandboxCapacityAvailable(db: DbClient, limits: ReturnType<typeof parseSandboxLimits>) {
+  const [result] = await db.sql`select demo_ops.sandbox_available(${limits.maxTenants}, ${limits.hourlyCreates}) as available`;
+  return result?.available === true;
 }

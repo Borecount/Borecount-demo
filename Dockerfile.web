@@ -9,6 +9,7 @@ COPY shared shared
 COPY apps/web apps/web
 COPY scripts/build-public-docs.mjs scripts/build-public-docs.mjs
 COPY docs docs
+COPY openapi openapi
 COPY README.md ARCHITECTURE.md ./
 ARG RELEASE_SHA
 ARG VITE_PUBLIC_URL=https://borecount.dev/

@@ -11,7 +11,7 @@ import type { SandboxSession } from './sandbox-types';
 import type { LibraryBridgeOptions } from './library-types';
 import { isSameOrigin } from './same-origin';
 import { issueAccessToken, type JwtAuthConfig } from '../api/auth/jwt';
-import { assertSandboxCapacity, parseSandboxLimits } from './public-host';
+import { assertSandboxCapacity, sandboxCapacityAvailable, type parseSandboxLimits } from './public-host';
 
 const COOKIE = 'borecount_sandbox';
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -23,9 +23,17 @@ const hash = (value: string) => createHash('sha256').update(value, 'utf8').diges
 const cookieValue = (request: FastifyRequest) => request.headers.cookie?.split(';')
   .map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 
-export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryOptions: LibraryBridgeOptions) {
+export function registerSandbox(server: FastifyInstance, db: DbClient, services: ApplicationServices, jwt: JwtAuthConfig, libraryOptions: LibraryBridgeOptions, publicLimits?: ReturnType<typeof parseSandboxLimits>) {
   const unitOfWork = createUnitOfWork(db);
-  const sandboxLimits = parseSandboxLimits(process.env);
+  if (publicLimits) {
+    server.get('/demo/availability', async (_request, reply) => {
+      reply.header('cache-control', 'no-store');
+      if (!await sandboxCapacityAvailable(db, publicLimits)) {
+        return reply.code(503).send({ error: 'SANDBOX_UNAVAILABLE', message: 'Sandbox creation unavailable' });
+      }
+      return { ok: true };
+    });
+  }
   const session = async (request: FastifyRequest): Promise<SandboxSession> => {
     const secret = cookieValue(request);
     if (!secret || !/^[a-f0-9]{64}$/.test(secret)) throw new UnauthorizedError('Start a demo session first');
@@ -75,7 +83,7 @@ export function registerSandbox(server: FastifyInstance, db: DbClient, services:
       rawApiKey: generateApiKey(),
     };
     const row = await unitOfWork.run(new TenantId(command.tenantId), async ({ provisioning, services, tx }) => {
-      await assertSandboxCapacity(tx, sandboxLimits);
+      if (publicLimits) await assertSandboxCapacity(tx, publicLimits, command.tenantId);
       const provisioned = await provisioning.provisionTenant(command);
       for (const code of ['USD', 'EUR'] as const) {
         const profile = sandboxProfiles[code];

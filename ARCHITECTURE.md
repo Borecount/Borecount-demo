@@ -93,8 +93,10 @@ Authentication errors map to `401 UNAUTHORIZED`, authorization to `403 FORBIDDEN
 
 `render.yaml` provides our disposable Render + Neon public demo. Migration, runtime and cleanup
 roles are distinct; cleanup has access only to a fixed-target reset function. Database-serialized
-admission caps retained sessions and hourly seeds; the public profile resets the whole simulated
-installation daily. No library business rules or history triggers are modified. See
+admission caps retained sessions and rolling-hour seeds only in the public profile. Admission
+history lives outside disposable tables and survives daily reset. `/demo/availability` checks
+capacity without provisioning or consuming the creation quota. Private/local hosts have no
+persistent admission cap. No library business rules or history triggers are modified. See
 [PUBLIC_DEMO.md](docs/PUBLIC_DEMO.md) for release, HTTPS, trust boundaries and operating limits.
 
 ## Deployment topology

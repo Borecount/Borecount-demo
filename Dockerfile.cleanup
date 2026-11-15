@@ -4,7 +4,7 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --omit=dev --workspace=@borecount/demo-api --include-workspace-root=false
-COPY scripts/public-demo-cleanup.mjs scripts/public-demo-cleanup.mjs
+COPY scripts/public-demo-cleanup.mjs scripts/safe-db-error.mjs scripts/
 USER node
 ENV NODE_ENV=production
 CMD ["node", "scripts/public-demo-cleanup.mjs", "--once"]

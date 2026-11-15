@@ -4,7 +4,7 @@ import { HostProtection } from '@api/resource-protection/host-protection';
 import { parseTrustedProxies } from '@api/resource-protection/trusted-proxies';
 import { canonicalOpenApi, createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
-import { assertPublicHost } from './demo/public-host';
+import { assertPublicHost, parseSandboxLimits } from './demo/public-host';
 import { isMainModule } from './utils/is-main-module';
 import { ApiKeyRole } from '@borecount/core/application';
 import { ForbiddenError } from '@borecount/core/errors';
@@ -82,7 +82,7 @@ export const run = async (): Promise<void> => {
   registerSandbox(server, dbClient, services, jwtAuth, {
     protection,
     specification: canonicalOpenApi,
-  });
+  }, process.env.PUBLIC_DEMO === 'true' ? parseSandboxLimits(process.env) : undefined);
   const port = parsePort(process.env.PORT);
   const shutdownTimeoutMs = parseShutdownTimeout(process.env.SHUTDOWN_TIMEOUT_MS);
 

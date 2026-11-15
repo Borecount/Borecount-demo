@@ -299,7 +299,7 @@ export const registerApplication = (
     const path = request.routeOptions.url ?? routePath(request.url);
     request.apiPath = path;
 
-    if (path.startsWith(V1_ROUTE_PREFIX) || path === '/demo/session' || path === '/demo/library/execute') {
+    if (path.startsWith(V1_ROUTE_PREFIX) || path === '/demo/session' || path === '/demo/availability' || path === '/demo/library/execute') {
       protection.beforeAuth(request.ip);
     }
     if (path === TOKEN_ENDPOINT) protection.tokenAttempt(request.ip);
