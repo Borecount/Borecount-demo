@@ -104,6 +104,12 @@ Individual commands are `npm run test:unit`, `npm run verify:openapi`, `npm run 
 
 Tests live in `tests/unit/`, `tests/integration/`, and `tests/e2e/`. The `scripts/` directory contains setup, database preparation, and other supporting commands.
 
+## Public evaluation deployment
+
+[Public demo runbook](docs/PUBLIC_DEMO.md) covers the Render + Neon public deployment: managed HTTPS,
+isolated roles/database, admission caps, scheduled daily cleanup, release checks and recovery.
+Use simulated test data only. This profile is separate from the private sales setup below.
+
 ## Private hosted sales demo
 
 The repository includes a provider-neutral container deployment with a same-origin nginx proxy,

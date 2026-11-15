@@ -152,6 +152,19 @@ For a private, single-instance sales environment, use the narrower
 [hosted demo runbook](HOSTED_DEMO.md). It provisions isolated sandboxes without a shared reset and packages
 the demo without claiming production SaaS readiness.
 
+## Public evaluation lifecycle
+
+The separate [public profile](PUBLIC_DEMO.md) adds a separate Neon project, non-owner runtime,
+restricted Render cleanup cron, daily disposable-installation reset, managed HTTPS and service limits.
+`PUBLIC_DEMO=true` requires that profile's database/role/marker and rejects overdue cleanup at readiness.
+`SANDBOX_MAX_TENANTS` (default 500, range 1–10000) and `SANDBOX_HOURLY_CREATES` (60, range 1–1000)
+bound successful provisioning only when `PUBLIC_DEMO=true`, through serialized database admission.
+The rolling-hour history is stored outside disposable sessions and survives reset. Local/private
+profiles do not apply these persistent caps. `GET /demo/availability` is public-profile-only: a
+non-consuming snapshot returning 503 for exhausted capacity or overdue cleanup. Admission saturation
+returns 429 before tenant creation. Cleanup applies only to the public profile;
+local/private histories remain retained.
+
 ## Private sandbox lifecycle
 
 `POST /demo/session` provisions a private tenant with USD/EUR assets, ledgers, demo accounts, and opening transactions through the public application services, then returns a short-lived SERVICE bearer. A random 256-bit session credential is set as an HttpOnly, SameSite=Strict cookie; only its SHA-256 hash is persisted as host session metadata. Production cookies are always Secure; HTTPS/access control remain ingress responsibilities. No raw library API key is exposed. `GET /demo/session` refreshes the bearer until the fixed eight-hour session boundary; the API rejects sandbox bearer use after that boundary as well.
@@ -160,6 +173,6 @@ New sandbox creation defaults to 20 attempts per source IP per hour per process.
 
 Creating a replacement sandbox revokes only its previous service key. It does not mutate another visitor's tenant. REST mode uses the public `/v1` contract. Library mode invokes the allowlisted application services directly through the same-origin, session-authenticated demo bridge. Both use the active sandbox tenant; the host owns session provisioning while the released packages own financial rules.
 
-Expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. The demo has no public reset endpoint or database-reset CLI; use a dedicated demo database and manage its lifecycle through separately reviewed infrastructure procedures. Immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0000–0002 come from Borecount v0.8.0. Migration 0003 adds the host session table.
+In the local/private profile, expired/replaced tenant histories are retained. Session expiry controls access, not storage retention. The local/private profile has no public reset endpoint or database-reset CLI; use a dedicated demo database and manage its lifecycle through separately reviewed infrastructure procedures. Immutable financial history must not be pruned with ad hoc deletes. Back up the database before upgrades. Migrations 0000–0002 come from Borecount v0.8.0. Migration 0003 adds the host session table.
 
 `npm run verify:schema` compares the installed library plus host Drizzle model with the checked-in snapshot. `npm run generate:api` regenerates frontend DTO types after an intentional contract update. Neither changes the downloaded canonical YAML.

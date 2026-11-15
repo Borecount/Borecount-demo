@@ -1,0 +1,68 @@
+# LL-133 local verification record
+
+Scope: implementation working tree on `codex/ll-133-public-hosting`, based on main `b85481b`.
+These results are local evidence, not a completed live Render/Neon rollout.
+The CI API process cleanup was subsequently corrected to stop the listening Node process directly;
+integration → all 20 E2E tests passed sequentially with explicit port-release verification.
+
+| Check | Result |
+| --- | --- |
+| Unit tests | 19 passed |
+| Real PostgreSQL integration | Passed: sandbox 99 HTTP requests, Library workflows, mixed-mode quotas, retries, rollback, isolation and expiry |
+| Chromium | 20 passed, including landing → release guides → posting → pilot contact link |
+| Public-host PostgreSQL test | Fresh setup and existing-installation upgrade passed using a separate temporary PostgreSQL 16 cluster; prior opening balances/history preserved |
+| Public-host safety | Non-owner RLS; denied DDL/TRUNCATE/cleanup; inaccessible canary; tenant/hour/concurrent seed limits; refusal of non-sandbox identities/unreviewed schema; restricted cron reset; old-token invalidation |
+| TypeScript / OpenAPI / generated types / schema snapshot | Passed |
+| Application build | Passed |
+| Render web and cleanup Docker builds | Passed |
+| Render nginx image tests | Passed: untrusted forwarding ignored, explicit trusted peer handling, Host/HTTPS forwarding, metrics denied, invalid broad trust rejected |
+| Ingress body bounds | Exact 1 MiB accepted; next byte rejected before upstream for Content-Length and chunked REST/Library |
+| Production dependency audit | `npm audit --omit=dev`: zero reported vulnerabilities after Fastify 5.12.8 / fast-uri patch updates |
+| Configuration | Deployment/workflow YAML parses; shell syntax and git whitespace checks pass |
+
+The public-host test creates fresh `luxledger_demo_hosted` / canary databases in an explicitly
+selected local non-default-port cluster, refuses existing installations and removes only its own
+fixtures. Reproduce with `PUBLIC_HOST_TEST_ADMIN_URL` set securely to that throwaway cluster's
+`postgres` database, then `npm run test:public`. Do not point it at Neon or a shared production cluster.
+
+Render ingress tests run in the built image with `tests/ingress` mounted read-only, as automated
+in `.github/workflows/verify.yml`. No database or public listener is required for those image tests.
+
+Not yet verified: live Neon managed-role setup and grants, actual Render Blueprint application,
+same-SHA web/cron deployment, DNS/managed HTTPS/Cloudflare boundary, real scheduled cleanup,
+notification delivery, account resource/billing limits and operating recovery. Follow
+[PUBLIC_DEMO.md](PUBLIC_DEMO.md) and retain sanitized live acceptance evidence before closing LL-133.
+
+## Live Neon preparation (partial)
+
+The existing dedicated demo database was inspected through Neon Console. It contained 17 sandbox
+tenants, 17 sessions and 34 opening postings, with no non-sandbox tenants or non-SERVICE keys.
+The initial ownership transaction hit a managed-role schema permission error and was rolled back;
+verification confirmed zero new roles and unchanged original owners. The corrected order grants
+schema ownership before transferring tables and now runs in tests under a NOSUPERUSER admin.
+The corrected transaction committed successfully in Neon: three service roles exist, application
+objects belong to borecount_demo_owner, and the 17/17/34 counts remain. Passwords were not set.
+Runtime grants, cleanup installation/scheduling and Render credential rollout remain separate steps.
+
+Live Neon runtime/cleanup permissions were then installed and committed with user approval.
+Metadata checks confirmed: runtime can read accounts but cannot TRUNCATE, CREATE in public,
+bypass RLS or execute cleanup; cleanup cannot read/TRUNCATE accounts or CREATE in public and
+can execute only the restricted reset/status functions. Account RLS remains enabled and the
+17 tenant / 17 session / 34 posting counts are unchanged. The reset function was not invoked;
+cron was not configured or started. Credential setup and Render rollout still require completion.
+
+## Review regression checks
+
+All six review findings are covered in the updated implementation and local tests:
+private/local provisioning ignores public persistent caps; the same DB can reject public admission
+while private provisioning succeeds; the operator CLI uses a managed admin's SET ROLE with a
+NOLOGIN owner; rolling-hour admission history survives whole-demo reset and recovers only when
+that hour expires; repeated availability probes leave admission history unchanged and return 503
+on exhausted capacity while readiness remains 200; cleanup logs only allowlisted code/category
+fields; generated README/architecture/docs/OpenAPI relative links resolve both locally and inside
+the Render image. The complete npm test pipeline, both PostgreSQL public-host variants, 19 unit
+and 20 browser tests, Render/cleanup builds and real nginx image tests passed.
+
+These review fixes were NOT applied to the live Neon or Render configuration. Before deploying
+the revised PUBLIC_DEMO profile, rerun db:prepare:public with the managed-admin connection to
+install/backfill the persistent admission history and updated functions without resetting data.

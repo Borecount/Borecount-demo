@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const child = spawn('npm', ['run', 'start'], {
+const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+  cwd: fileURLToPath(new URL('../apps/api/', import.meta.url)),
   stdio: 'inherit',
   env: {
     ...process.env,

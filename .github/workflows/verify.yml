@@ -1,0 +1,41 @@
+name: Verify host
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: luxledger
+          POSTGRES_PASSWORD: luxledger
+        ports: ["5433:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      - run: npm run test:public
+        env:
+          PUBLIC_HOST_TEST_ADMIN_URL: postgresql://luxledger:luxledger@127.0.0.1:5433/postgres
+  render-ingress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Render image
+        run: docker build -f Dockerfile.render --build-arg RELEASE_SHA=${{ github.sha }} -t demo-render-check .
+      - name: Check ingress boundaries
+        run: |
+          docker run --rm -v "$PWD/tests/ingress:/tests:ro" --entrypoint sh demo-render-check -c 'node /tests/render-boundary.mjs && node --import tsx deploy/render-configure.mjs && INGRESS_TEST_PORT=10000 node /tests/body-limit.mjs'

@@ -1,0 +1,32 @@
+name: Public demo availability
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      full_smoke:
+        description: Create two disposable sandboxes and verify a posting
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  check:
+    if: vars.PUBLIC_DEMO_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check readiness, sandbox admission and versioned guides
+        env:
+          PUBLIC_DEMO_URL: ${{ vars.PUBLIC_DEMO_URL }}
+          FULL_SMOKE: ${{ inputs.full_smoke }}
+        run: |
+          if [ "$FULL_SMOKE" = true ]; then
+            node scripts/public-demo-smoke.mjs
+          else
+            node scripts/public-demo-smoke.mjs --read-only
+          fi

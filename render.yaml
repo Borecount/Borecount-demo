@@ -1,0 +1,57 @@
+# Our public evaluation service, not a client self-hosting distribution (LL-132).
+# Bootstrap the separate Neon demo project with deploy/public/neon-init.sql first.
+services:
+  - type: web
+    name: borecount-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile.render
+    region: frankfurt
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: off
+    healthCheckPath: /ready
+    maxShutdownDelaySeconds: 30
+    domains:
+      - borecount.dev
+    envVars:
+      - key: PUBLIC_DEMO
+        value: "true"
+      - key: DATABASE_URL
+        sync: false # Direct Neon connection as borecount_demo_runtime, sslmode=verify-full
+      - key: JWT_SIGNING_KEY
+        sync: false # Independently generated unpadded base64url 32+ byte key
+      - key: JWT_ISSUER
+        value: borecount-public-demo
+      - key: DB_POOL_MAX
+        value: "5"
+      - key: DB_CONNECT_TIMEOUT
+        value: "5"
+      - key: DB_IDLE_TIMEOUT
+        value: "20"
+      - key: SHUTDOWN_TIMEOUT_MS
+        value: "10000"
+      - key: TRUSTED_PROXY_CIDRS
+        value: 127.0.0.1/32
+      - key: RENDER_TRUSTED_PROXY_CIDRS
+        sync: false # Actual, verified Render ingress peer(s); empty safely shares the proxy IP budget
+      - key: SANDBOX_MAX_TENANTS
+        value: "500"
+      - key: SANDBOX_HOURLY_CREATES
+        value: "60"
+      - key: REPORT_CONCURRENCY_MAX
+        value: "2"
+      - key: REPORT_TENANT_CONCURRENCY_MAX
+        value: "1"
+      - key: VITE_PUBLIC_URL
+        value: https://borecount.dev/
+  - type: cron
+    name: borecount-demo-cleanup
+    runtime: docker
+    dockerfilePath: ./Dockerfile.cleanup
+    region: frankfurt
+    plan: 0.5c-512mb
+    schedule: "*/5 * * * *" # UTC; reset only when the 24-hour deadline is due
+    autoDeployTrigger: off
+    envVars:
+      - key: DATABASE_URL
+        sync: false # Direct Neon connection as borecount_demo_cleanup ONLY

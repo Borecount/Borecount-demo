@@ -4,6 +4,7 @@ import { HostProtection } from '@api/resource-protection/host-protection';
 import { parseTrustedProxies } from '@api/resource-protection/trusted-proxies';
 import { canonicalOpenApi, createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
+import { assertPublicHost, parseSandboxLimits } from './demo/public-host';
 import { isMainModule } from './utils/is-main-module';
 import { ApiKeyRole } from '@borecount/core/application';
 import { ForbiddenError } from '@borecount/core/errors';
@@ -39,6 +40,14 @@ const parseShutdownTimeout = (value: string | undefined): number => {
 
 export const run = async (): Promise<void> => {
   const dbClient = createDbClient();
+  if (process.env.PUBLIC_DEMO === 'true') {
+    try {
+      await assertPublicHost(dbClient, process.env.DATABASE_URL);
+    } catch (error) {
+      await dbClient.sql.end({ timeout: 5 });
+      throw error;
+    }
+  }
   const rateLimit = parseRateLimitConfig(process.env);
   const protection = new HostProtection(rateLimit);
   const server = createServerCore({
@@ -46,6 +55,12 @@ export const run = async (): Promise<void> => {
     trustedProxies: parseTrustedProxies(process.env.TRUSTED_PROXY_CIDRS),
     readinessCheck: async () => {
       await dbClient.sql`select 1`;
+      if (process.env.PUBLIC_DEMO === 'true') {
+        const [state] = await dbClient.sql`select demo_ops.public_status() as status`;
+        if (!state?.status || Date.parse(state.status.next_reset_at) < Date.now() - 900_000) {
+          throw new Error('Public sandbox cleanup is overdue');
+        }
+      }
     },
     logger: true,
   });
@@ -67,7 +82,7 @@ export const run = async (): Promise<void> => {
   registerSandbox(server, dbClient, services, jwtAuth, {
     protection,
     specification: canonicalOpenApi,
-  });
+  }, process.env.PUBLIC_DEMO === 'true' ? parseSandboxLimits(process.env) : undefined);
   const port = parsePort(process.env.PORT);
   const shutdownTimeoutMs = parseShutdownTimeout(process.env.SHUTDOWN_TIMEOUT_MS);
 
@@ -110,7 +125,7 @@ export const run = async (): Promise<void> => {
 
   try {
     await server.listen({
-      host: '0.0.0.0',
+      host: process.env.PUBLIC_DEMO === 'true' ? '127.0.0.1' : '0.0.0.0',
       port,
     });
   } catch {

@@ -26,14 +26,18 @@
     "test:e2e": "node scripts/prepare-test-db.mjs && playwright test",
     "test": "npm run test:unit && npm run verify:openapi && npm run verify:schema && npm run typecheck && npm run build && npm run test:integration && npm run test:e2e",
     "generate:api": "node scripts/generate-api-types.mjs",
-    "verify:schema": "node --import tsx scripts/verify-schema.mjs"
+    "verify:schema": "node --import tsx scripts/verify-schema.mjs",
+    "test:public": "node tests/integration/public-host.test.mjs && node tests/integration/public-host.test.mjs --upgrade",
+    "smoke:public": "node scripts/public-demo-smoke.mjs",
+    "monitor:public": "node scripts/public-demo-smoke.mjs --read-only",
+    "db:prepare:public": "node scripts/prepare-public-demo.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "concurrently": "^9.2.0"
   },
   "overrides": {
-    "fastify": "5.10.0",
+    "fastify": "5.12.8",
     "drizzle-orm": "0.45.2"
   }
 }
