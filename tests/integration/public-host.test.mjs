@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import { tsImport } from 'tsx/esm/api';
@@ -22,6 +22,43 @@ const url = (database, role = target.username, password = target.password) => {
   const next = new URL(target); next.pathname = `/${database}`; next.username = role; next.password = password; return next.href;
 };
 const options = { parentURL: import.meta.url, tsconfig: fileURLToPath(new URL('../../apps/api/tsconfig.json', import.meta.url)) };
+async function runScheduler(databaseUrl, expectedEvents) {
+  const child = spawn(process.execPath, ['scripts/public-demo-scheduler.mjs'], {
+    env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  let exited = false;
+  const shutdownLimit = setTimeout(() => { if (!exited) child.kill('SIGKILL'); }, 15_000);
+  child.stdout.setEncoding('utf8').on('data', chunk => { output += chunk; });
+  child.stderr.setEncoding('utf8').on('data', chunk => { output += chunk; });
+  const exit = new Promise(resolve => child.once('exit', (code, signal) => { exited = true; resolve({ code, signal }); }));
+  const eventWait = new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error(`Scheduler events timed out: ${expectedEvents.join(', ')}`)), 10_000);
+    const check = () => {
+      if (expectedEvents.every(event => output.includes(`"event":"${event}"`))) {
+        clearTimeout(deadline); resolve();
+      } else if (exited) {
+        clearTimeout(deadline); reject(new Error(`Scheduler exited before expected events: ${output}`));
+      }
+    };
+    child.stdout.on('data', check); child.stderr.on('data', check);
+    check();
+  });
+  try {
+    await eventWait;
+    child.kill('SIGTERM');
+    const result = await exit;
+    assert.equal(result.code, 0, `Scheduler should stop cleanly: ${output}`);
+    assert.ok(expectedEvents.every(event => output.includes(`"event":"${event}"`)));
+    return output;
+  } finally {
+    clearTimeout(shutdownLimit);
+    if (!exited) {
+      child.kill('SIGKILL');
+      await exit;
+    }
+  }
+}
 try {
   await admin.unsafe('CREATE DATABASE luxledger_demo_hosted'); created.push('luxledger_demo_hosted');
   if (upgrading) {
@@ -84,6 +121,9 @@ try {
   assert.equal(prepared.status, 0, prepared.stderr.toString());
   owner = postgres(releaseUrl, { max: 1, onnotice: () => {} });
   await owner.unsafe('SET ROLE borecount_demo_owner');
+  const migrationJournal = await owner`select count(*)::int as n from drizzle.__drizzle_migrations`;
+  assert.ok(migrationJournal[0].n > 0, 'Public preparation must retain the existing migration journal');
+  const journalBeforeReset = await owner`select id, hash, created_at from drizzle.__drizzle_migrations order by id`;
   if (upgrading) assert.equal((await owner`select rolcanlogin from pg_roles where rolname = 'borecount_demo_owner'`)[0].rolcanlogin, false, 'Managed admin SET ROLE supports a NOLOGIN owner');
   // Releasing an unchanged profile is idempotent and must not postpone the retention deadline.
   const before = await owner`select next_reset_at from demo_ops.state`;
@@ -106,7 +146,11 @@ try {
   }
   const services = createApplicationServices(runtime);
   const protection = new HostProtection();
-  server = createServerCore({ logger: false, readinessCheck: async () => { await runtime.sql`select 1`; } });
+  server = createServerCore({ logger: false, readinessCheck: async () => {
+    await runtime.sql`select 1`;
+    const [state] = await runtime.sql`select demo_ops.public_status() as status`;
+    if (!state?.status || Date.parse(state.status.next_reset_at) < Date.now() - 900_000) throw new Error('Public sandbox cleanup is overdue');
+  } });
   registerApplication(server, { services, jwtAuth, protection, authorizeAdjustment: false });
   const publicLimits = { maxTenants: upgrading ? 3 : 2, hourlyCreates: upgrading ? 3 : 2 };
   registerSandbox(server, runtime, services, jwtAuth, { protection, specification: canonicalOpenApi }, publicLimits);
@@ -154,7 +198,9 @@ try {
   assert.equal((await cleanup`select demo_ops.cleanup_due() as reset`)[0].reset, false);
   // A non-sandbox tenant makes destructive cleanup fail closed, even with a due deadline.
   await owner`insert into tenants (id, name) values ('00000000-0000-4000-8000-000000000133', 'Do not reset')`;
-  await owner`update demo_ops.state set next_reset_at = now() - interval '1 second'`;
+  await owner`update demo_ops.state set next_reset_at = now() - interval '16 minutes'`;
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 503);
+  expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 503);
   await assert.rejects(() => cleanup`select demo_ops.cleanup_due()`);
   const refusedWorker = spawnSync(process.execPath, ['scripts/public-demo-cleanup.mjs'], {
     env: { ...process.env, DATABASE_URL: url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup) }, stdio: 'pipe',
@@ -171,13 +217,28 @@ try {
   await owner`drop table public.unreviewed_data`;
   // Real ledger+session data is reset atomically; the rolling-hour admission budget survives it.
   const quotaBeforeReset = await admissions();
-  const worker = spawnSync('node', ['scripts/public-demo-cleanup.mjs', '--once'], {
-    env: { ...process.env, DATABASE_URL: url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup) }, stdio: 'pipe',
+  // Hold the real cleanup advisory lock from a separate connection; the worker must fail closed.
+  await owner.begin(async tx => {
+    await tx`select pg_advisory_xact_lock(133132)`;
+    assert.equal((await cleanup`select demo_ops.cleanup_due() as reset`)[0].reset, false);
   });
-  assert.equal(worker.status, 0, 'Restricted cleanup worker must reset the due installation');
-  assert.match(worker.stdout.toString(), /sandbox_database_reset/);
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 503);
+  const cleanupUrl = url('luxledger_demo_hosted', 'borecount_demo_cleanup', passwords.cleanup);
+  const schedulerOutput = await runScheduler(cleanupUrl, ['sandbox_database_reset', 'sandbox_cleanup_scheduled']);
+  for (const password of Object.values(passwords)) assert.ok(!schedulerOutput.includes(password), 'Scheduler output must not expose credentials');
   assert.equal((await owner`select count(*)::int as n from tenants`)[0].n, 0);
   assert.equal((await owner`select count(*)::int as n from demo_sessions`)[0].n, 0);
+  const [resetState] = await owner`select next_reset_at > now() as deadline_is_future from demo_ops.state`;
+  assert.equal(resetState.deadline_is_future, true, 'Successful reset must persist a future cleanup deadline');
+  assert.deepEqual(await owner`select id, hash, created_at from drizzle.__drizzle_migrations order by id`, journalBeforeReset,
+    'Whole-demo cleanup must retain the migration journal');
+  const deadlineAfterReset = (await owner`select next_reset_at from demo_ops.state`)[0].next_reset_at;
+  const futureSchedulerOutput = await runScheduler(cleanupUrl, ['sandbox_cleanup_scheduled']);
+  for (const password of Object.values(passwords)) assert.ok(!futureSchedulerOutput.includes(password), 'Scheduler output must not expose credentials');
+  assert.ok(!futureSchedulerOutput.includes('"event":"sandbox_database_reset"'), 'Future deadline must not trigger a reset');
+  assert.deepEqual((await owner`select next_reset_at from demo_ops.state`)[0].next_reset_at, deadlineAfterReset,
+    'Starting scheduler with a future deadline must preserve it');
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 200);
   assert.deepEqual(await admissions(), quotaBeforeReset, 'Daily reset must not reset the rolling-hour quota');
   expect(await rest('/v1/ledgers'), 401);
   expect(await start(), 429);

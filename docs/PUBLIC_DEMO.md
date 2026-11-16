@@ -16,18 +16,23 @@ borecount.dev → Render managed HTTPS → nginx :10000 → API 127.0.0.1:3000
                                                         ↓ runtime role
                                           dedicated Neon PostgreSQL 16
                                                         ↑ restricted function
-                             GitHub Actions (every 5 minutes, cleanup role)
+                             supervised Node worker (same Render container)
 ```
 
-`render.yaml` defines one bounded web instance. GitHub Actions schedules cleanup. Render supplies TLS,
+`render.yaml` defines one bounded web instance. A supervised Node worker schedules cleanup from the
+persisted database deadline; no paid Render cron is used. GitHub Actions is an opt-in recovery tool. Render supplies TLS,
 health-based routing/restarts, service resource limits and notifications. Neon supplies the
 separate database/compute boundary. There is no Caddy/VPS/Docker Compose requirement for this
 public deployment. The existing `compose.hosted.yml` remains the separate private/local demo.
 
-The web service gets **only** the runtime DB credential and JWT signing secret. The cleanup step
-gets **only** the cleanup DB credential from GitHub Secrets. Neither receives the migration owner, Neon API token, production DB
-URL or production privileges. Keep demo and SaaS in separate Neon projects; do not branch from
-production data. Merely renaming a database in a production project is not this isolation model.
+The container/supervisor holds both runtime and cleanup credentials. The API receives the runtime
+URL and JWT signing secret, with the cleanup secret explicitly removed. The cleanup worker receives
+only a small OS-environment allowlist and its cleanup URL mapped to `DATABASE_URL`; it receives no
+runtime URL, JWT, bootstrap/admin credential or inherited arbitrary secret. nginx and configuration
+receive no database credentials. This is reduced isolation compared with a separate cron service:
+process environment separation does not protect against compromise of the container/supervisor.
+Neither role receives migration-owner, production or Neon API privileges. Keep demo and SaaS in
+separate Neon projects; do not branch from production data.
 
 LL-132/135 own general installation/upgrade/backup/verified restore; LL-134 supplies reusable host
 limits; LL-136 covers isolation assurance. Daily disposable reset is not backup or portable tenant
@@ -49,10 +54,10 @@ current paid compute plan, domain and certificate. Do not run `neon-init.sql` ag
    checks migration history, runs migrations and installs permissions/marker/functions. It does
    not execute cleanup and does not need a password or LOGIN on the owner role.
 4. The account owner securely sets the two operational role passwords and enters each direct
-   verified-TLS connection in Render (runtime) or GitHub Secrets (cleanup). The migration owner can remain
+   verified-TLS connection in Render (runtime and separate cleanup secret), retaining the cleanup GitHub Secret for recovery. The migration owner can remain
    NOLOGIN when migrations are run via the managed admin's explicit SET ROLE.
 5. Keep the old Render connection active until replacement permissions are verified. Update the
-   existing service and configure the GitHub cleanup workflow; no project, domain, certificate or paid web-plan migration
+   existing service and configure the embedded cleanup worker; no project, domain, certificate or paid web-plan migration
    is needed. Enable the daily-reset schedule only after reviewing its destructive scope.
 
 The initial-install instructions below apply only to a genuinely new empty project.
@@ -109,6 +114,9 @@ See [Blueprint configuration](https://render.com/docs/blueprint-spec).
 Web settings:
 
 - `DATABASE_URL`: direct verified-TLS URL as `borecount_demo_runtime`.
+- `PUBLIC_DEMO_CLEANUP_DATABASE_URL`: separate direct verified-TLS URL as `borecount_demo_cleanup`.
+- `PUBLIC_DEMO_CLEANUP_ENABLED=true`: embedded worker switch, used only with `PUBLIC_DEMO=true`.
+  Set false to disable the worker for rollback; private/local profiles never require its secret.
 - `JWT_SIGNING_KEY`: independent unpadded base64url encoding of 32+ random bytes.
 - `PUBLIC_DEMO=true`, `TRUSTED_PROXY_CIDRS=127.0.0.1/32`, bounded pool of 5 connections.
 - `RENDER_TRUSTED_PROXY_CIDRS`: only verified immediate Render ingress peer IPs/CIDRs. Empty
@@ -116,32 +124,59 @@ Web settings:
 - `VITE_PUBLIC_URL=https://borecount.dev/` (build input), `/ready` health check, one instance,
   0.5 CPU / 512 MiB service plan, 30-second shutdown allowance.
 
-Cleanup settings in GitHub repository **Settings → Secrets and variables → Actions**:
+Credential map:
 
-1. Add Actions secret `PUBLIC_DEMO_CLEANUP_DATABASE_URL`: direct verified-TLS URL as
-   `borecount_demo_cleanup`, never an admin/runtime URL.
-2. Review that the daily reset deletes all disposable financial/session data and invalidates
-   active sessions. After approval, set Actions variable `PUBLIC_DEMO_CLEANUP_ENABLED=true`.
-3. Merge `.github/workflows/public-cleanup.yml` into `main`. It runs only on main, with a
-   read-only repository token, serialized runs, locked production dependencies, and a 45-second
-   database script deadline. The job has a five-minute timeout and never runs on pull requests.
-4. Use **Actions → Public demo cleanup → Run workflow** on main for the first approved run.
-   If the persisted deadline is due, this immediately resets the demo. Check the sanitized result
-   and the new deadline; do not invoke it merely as a connectivity probe.
+| Location/process | Credential | Allowed use |
+| --- | --- | --- |
+| Render container/supervisor | Both separate runtime and cleanup URLs | Launch isolated child environments |
+| API | Runtime `DATABASE_URL`, JWT key | Financial demo workflows; no reset |
+| Cleanup worker | Cleanup URL mapped to `DATABASE_URL` | Restricted status/reset functions only |
+| nginx/configuration | None | Ingress configuration/serving |
+| GitHub recovery job | Cleanup Actions secret | Operator opt-in recovery |
+| Operator preparation only | Managed admin/owner URL | Reviewed migrations/permissions; never API/worker env |
 
-The requested UTC schedule is `2-59/5 * * * *`, avoiding the start of the hour. GitHub may delay
-or drop scheduled jobs under load, and disables schedules in inactive public repositories after
-60 days. This is a best-effort demo scheduler: the existing 15-minute overdue guard still fails
-closed, so delays can make the demo unavailable until cleanup succeeds. Monitor failures and
-schedule activity, and run manually if necessary. See [GitHub schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
-Standard runners are free for this public repository; Neon queries still consume its compute
-allowance. See [Actions billing](https://docs.github.com/en/actions/concepts/billing-and-usage).
+### LL-150 rollout and recovery scheduler
+
+1. Review and test the scheduler/supervisor SHA before changing live settings. Keep the existing
+   runtime URL. Enter the separate cleanup-role URL using Render's operator credential-entry flow;
+   do not copy it into logs, chat, source or shell arguments. Existing Blueprints do not prompt for
+   newly added `sync: false` secrets automatically.
+2. Deploy the reviewed SHA manually with `PUBLIC_DEMO=true` and
+   `PUBLIC_DEMO_CLEANUP_ENABLED=true`. No database preparation is needed for this scheduling-only
+   change. Verify API, nginx and worker are all running. Check safe `sandbox_cleanup_started` and
+   `sandbox_cleanup_scheduled` events against the **existing** stored `next_reset_at`; restarting
+   must not change that value. A due startup immediately invokes the guarded cleanup function.
+3. The current Actions cleanup can overlap briefly during migration: the database advisory lock
+   serializes reset, and the worker rereads the persisted deadline after each invocation. Once the
+   embedded worker is verified, set the **GitHub Actions variable**
+   `PUBLIC_DEMO_CLEANUP_ENABLED=false`. This variable is separate from Render's same-named switch.
+   Do not disable the external read-only `Public demo availability` monitor.
+4. Record `sandbox_cleanup_attempt.at`, `next_reset_at`, and `lateness_ms` for the first scheduled
+   attempt (target: starts within 60 seconds while the container is healthy), separately from
+   `sandbox_database_reset.at` and the following persisted deadline. Record public HTTPS/readiness/
+   availability and `npm run smoke:public` results. Do not manually force a live deadline/reset for
+   acceptance without explicit approval; use the isolated PostgreSQL fixture for destructive tests.
+5. Verify monitoring notification delivery separately. A green Actions run proves neither alert
+   delivery nor that the internal scheduler met its deadline.
+
+Retain `.github/workflows/public-cleanup.yml`, its cleanup secret and the portable cleanup image
+as operator recovery tools. For recovery, temporarily set the **Actions variable**
+`PUBLIC_DEMO_CLEANUP_ENABLED=true`, manually dispatch **Public demo cleanup** on main, inspect the
+sanitized result/new deadline, then set that variable false again. Both manual and scheduled runs
+use this opt-in; enabling it also temporarily enables its five-minute schedule. The script resets
+all disposable demo data if due, so it is not a connectivity probe. GitHub scheduling is best effort
+and is not the primary timing guarantee.
+
+Rollback: set the **Render** switch `PUBLIC_DEMO_CLEANUP_ENABLED=false`, restore the previously
+reviewed compatible deployment/configuration and re-enable Actions cleanup when needed. Never
+restore owner credentials to the API, postpone the stored deadline, or reset/delete the database
+as a rollback. Disabling the worker removes timely cleanup until the recovery path succeeds.
 
 Remove any inherited owner/admin/production URL from the existing web service: Blueprint omission
 **does not remove old environment variables**. No public startup migrations run. Prepare the DB
 with the owner separately, then deploy the reviewed web SHA. Web deployment remains manual
-(`autoDeployTrigger: off`). Cleanup runs the current main revision; review SQL/function compatibility
-before merging future cleanup changes and record both revisions in rollout evidence.
+(`autoDeployTrigger: off`). The embedded worker uses the web revision; manual Actions recovery uses main. Review SQL/function
+compatibility and record both revisions in rollout evidence.
 
 `Verify host` checks unit/contracts/schema/types/build, real PostgreSQL workflows, Chromium and the
 restricted public-host lifecycle. `Build Render demo release` requires those checks, then builds
@@ -180,19 +215,32 @@ rolls back its admission row. Only entries older than one hour are pruned. Per-I
 REST/Library quotas, a 1 MiB body cap, report concurrency 2/global and 1/tenant, database role query/
 lock timeouts and the 5-connection pool also apply. See [OPERATIONS.md](OPERATIONS.md).
 
-The GitHub workflow requests a run every five minutes and calls one fixed-target function. Once the persisted 24-hour deadline is
-due, it atomically truncates **all reviewed financial/session tables of this disposable installation**.
-This is whole-demo reset, not deletion of a customer's immutable tenant history. The function uses
-a fixed search path and explicit tables; it never disables triggers or uses CASCADE. Marker and
-migration and rolling-hour admission history survive. Unexpected tables, foreign dependencies, non-sandbox tenants or
-non-SERVICE credentials fail closed. Cleanup has no direct table, schema, role-management or
-TRUNCATE permission and no production credentials. Old keys/tokens cease working after reset.
+The worker opens at most one short-lived cleanup-role connection per check and closes it before
+sleeping. At startup it validates the exact database/role/direct verified-TLS URL, reads the expected
+marker and valid persisted `next_reset_at`, then sleeps on one absolute-deadline timer. Normal
+operation does not poll every minute/five minutes. At a due deadline it invokes only
+`demo_ops.cleanup_due()`; PostgreSQL time, marker, schema/identity guards and advisory lock remain
+authoritative. The function atomically truncates **all reviewed financial/session tables of this
+disposable installation**. This is whole-demo reset, not deletion of customer immutable history.
+It uses fixed tables/search path, no CASCADE or disabled triggers. Marker, migration journal and
+rolling-hour admission history survive. Unexpected schema, non-sandbox tenants or non-SERVICE
+credentials fail closed. Cleanup has no direct table/TRUNCATE or role-management privileges.
 
-The reset may briefly lock tables/end active sessions. Failure retries at the next scheduled run;
-readiness fails if the reset deadline is more than 15 minutes overdue. GitHub cleanup failures and web
-readiness must notify our operator. Cleanup errors report only an allowlisted SQLSTATE/application
-code and static reason category (for example `P1303` / `non_sandbox_data`, `P1304` / `schema_drift`,
-`42501` / `permission`, `55P03` / `lock_timeout`), never raw messages, queries or credentials.
+After each invocation the worker rereads status, including after a query failure. A newly advanced
+deadline from either worker is used unchanged; failures, busy lock, or a still-due deadline retry
+in five minutes. Invalid/missing marker/status never authorizes reset. Early clock-skew timers
+reschedule the future persisted deadline. Attempts do not overlap and have a 45-second deadline;
+shutdown clears timers and closes the connection. SIGTERM/SIGINT and unexpected child exits are
+supervised, with a bounded termination/kill fallback for all remaining processes.
+
+The reset can briefly lock tables/end sessions. `/ready` and `/demo/availability` retain their
+15-minute overdue grace; admission exhaustion may fail availability while readiness stays healthy.
+A stopped/unhealthy Render container cannot run this scheduler; restart inspects the stored deadline
+and recovers overdue work. This remains a disposable demo without HA or production SLA.
+
+Safe structured events include startup, scheduled deadline, attempt start/lateness, retry, check,
+reset, failure and shutdown. Diagnostics contain only allowlisted codes/categories and timestamps,
+never raw exceptions, messages, SQL, credentials or URLs. Monitor retries and overdue attempt starts.
 Database admission limits do not bound exact storage bytes:
 monitor Neon database growth and WAL/history-retention usage; logical reset does not remove the
 provider's retained backup/history immediately. No real data is permitted in this environment.
@@ -219,7 +267,7 @@ notifications. A missing URL deliberately disables network checks. Verify actual
 delivery; repository configuration alone does not establish an operating alert channel.
 
 Render's `/ready` HTTP health checks gate deployment and restart unhealthy web instances; the
-entrypoint exits if either nginx or API stops. See [Render health checks](https://render.com/docs/health-checks).
+supervisor exits nonzero if nginx, API or the enabled cleanup worker stops unexpectedly. See [Render health checks](https://render.com/docs/health-checks).
 Scheduler and database incidents need separate investigation. Monitor 5xx, p95 latency, 429s, OOM/CPU,
 Neon connections/size/storage, cleanup failures and certificate expiry. Initial thresholds: sustained
 5xx >1%, p95 >2 seconds, memory >80%, storage >75% of budget or repeated reset failures. Tune from
@@ -238,7 +286,7 @@ Initial planning envelope, to be reconciled with our actual account before publi
 | Resource | Budget |
 | --- | --- |
 | Render web | One 0.5-CPU / 512-MiB instance continuously; 365 vCPU-hours and 365 GiB-hours at 730 hours |
-| GitHub cleanup | Up to 8640 scheduled jobs/30 days; standard runners free for this public repo; no separate Render cron charge |
+| Cleanup | Embedded in existing Render web instance; one daily attempt plus recovery retries; Actions disabled normally; no paid Render cron |
 | Neon compute | Separate PostgreSQL 16 project, initial 0.25-CU floor / 0.5-CU ceiling; up to 182.5 CU-hours/month at floor if kept awake |
 | Neon logical data | 1 GiB initial alert budget, plus separately measured retained history/WAL |
 | Egress | 10 GiB/month initial budget across Render/Neon; measure actual use |

@@ -11,6 +11,7 @@ const categories = {
   ECONNREFUSED: 'connection', ECONNRESET: 'connection', ETIMEDOUT: 'connection_timeout',
   ENOTFOUND: 'dns', EAI_AGAIN: 'dns',
   CLEANUP_OVERDUE: 'cleanup_overdue', MISSING_MARKER: 'missing_marker',
+  INVALID_STATUS: 'invalid_status', DEADLINE_EXCEEDED: 'timeout',
   MIGRATION_HISTORY_MISMATCH: 'migration_history', CONFIGURATION_INVALID: 'configuration',
 };
 export function safeDatabaseFailure(error) {
