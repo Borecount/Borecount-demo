@@ -78,3 +78,31 @@ Render cron. It retains the existing role and reset function, runs serially, and
 15-minute overdue guard. GitHub schedule delays can therefore cause a fail-closed outage.
 Live secret installation, explicit schedule activation, first approved reset and notification
 verification remain rollout steps; adding the workflow alone does not establish live cleanup.
+
+## LL-150 embedded scheduler (2026-11-16)
+
+The primary implementation now runs a supervised Node worker inside the existing Render web
+container. No paid Render cron or SQL/role changes are introduced. Actions remains an opt-in
+recovery path; its live variable must remain enabled until the embedded worker is verified.
+
+Local evidence:
+
+- Deterministic clock/timer tests cover future deadlines without polling, overdue startup,
+  persisted rescheduling, retry/error/lock-busy-equivalent false results, competing workers,
+  container clock offsets/jumps against sampled DB time and monotonic elapsed time,
+  invalid marker/status/database time, attempt timeout and shutdown. Regressions cover paired
+  cleanup/status failures without losing the original diagnostic, invalid switch values and
+  explicit rejection of unsupported channel-binding URL options.
+- Real child-process tests cover environment secret canaries, private/public launch profiles,
+  all required child exit/spawn failures, signals and bounded forced shutdown.
+- Both fresh and upgrade fixtures pass in a disposable local PostgreSQL 16 cluster: real
+  advisory-lock contention, overdue readiness/admission refusal, guarded reset, future deadline,
+  migration/admission-history preservation, token invalidation and inaccessible canary.
+- TypeScript, OpenAPI/generated types, schema checks and web build pass. Render and portable
+  cleanup Docker builds and existing image ingress/body-limit checks pass.
+
+Live acceptance is **pending**: operator entry of the separate Render cleanup secret, reviewed
+SHA deployment, existing deadline/supervised-process verification, Actions scheduler disablement,
+first live scheduled attempt within 60 seconds and its following persisted deadline, HTTPS/sandbox
+smoke and actual alert delivery. No live secret, schedule, database deadline or data was changed
+for these local tests. See the rollout/rollback procedure in [PUBLIC_DEMO.md](PUBLIC_DEMO.md).
