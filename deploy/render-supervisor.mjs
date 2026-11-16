@@ -5,13 +5,17 @@ import { fileURLToPath } from 'node:url';
 const osEnvironmentKeys = ['PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TZ', 'SYSTEMROOT', 'WINDIR'];
 
 export function childSpecifications(env = process.env) {
+  const cleanupEnabled = env.PUBLIC_DEMO_CLEANUP_ENABLED ?? 'true';
+  if (env.PUBLIC_DEMO === 'true' && !['true', 'false'].includes(cleanupEnabled)) {
+    throw new Error('PUBLIC_DEMO_CLEANUP_ENABLED must be true or false');
+  }
   const apiEnv = { ...env, PORT: '3000', TSX_TSCONFIG_PATH: '/app/apps/api/tsconfig.json' };
   delete apiEnv.PUBLIC_DEMO_CLEANUP_DATABASE_URL;
   const specs = [
     { name: 'api', command: process.execPath, args: ['--import', 'tsx', 'apps/api/src/index.ts'], env: apiEnv },
     { name: 'nginx', command: 'nginx', args: ['-g', 'daemon off;'], env: Object.fromEntries(osEnvironmentKeys.filter(key => env[key] !== undefined).map(key => [key, env[key]])) },
   ];
-  if (env.PUBLIC_DEMO === 'true' && (env.PUBLIC_DEMO_CLEANUP_ENABLED ?? 'true') === 'true') {
+  if (env.PUBLIC_DEMO === 'true' && cleanupEnabled === 'true') {
     if (!env.PUBLIC_DEMO_CLEANUP_DATABASE_URL?.trim()) throw new Error('Public demo cleanup database credential is required');
     const workerEnv = Object.fromEntries(osEnvironmentKeys.filter(key => env[key] !== undefined).map(key => [key, env[key]]));
     Object.assign(workerEnv, { NODE_ENV: 'production', PUBLIC_DEMO: 'true', PUBLIC_DEMO_CLEANUP_ENABLED: 'true', DATABASE_URL: env.PUBLIC_DEMO_CLEANUP_DATABASE_URL });

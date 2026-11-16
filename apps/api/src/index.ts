@@ -4,7 +4,7 @@ import { HostProtection } from '@api/resource-protection/host-protection';
 import { parseTrustedProxies } from '@api/resource-protection/trusted-proxies';
 import { canonicalOpenApi, createServerCore, registerApplication } from '@api/server';
 import { registerSandbox } from './demo/sandbox';
-import { assertPublicHost, parseSandboxLimits } from './demo/public-host';
+import { assertPublicHost, assertPublicReadiness, parseSandboxLimits } from './demo/public-host';
 import { isMainModule } from './utils/is-main-module';
 import { ApiKeyRole } from '@borecount/core/application';
 import { ForbiddenError } from '@borecount/core/errors';
@@ -56,10 +56,7 @@ export const run = async (): Promise<void> => {
     readinessCheck: async () => {
       await dbClient.sql`select 1`;
       if (process.env.PUBLIC_DEMO === 'true') {
-        const [state] = await dbClient.sql`select demo_ops.public_status() as status`;
-        if (!state?.status || Date.parse(state.status.next_reset_at) < Date.now() - 900_000) {
-          throw new Error('Public sandbox cleanup is overdue');
-        }
+        await assertPublicReadiness(dbClient);
       }
     },
     logger: true,

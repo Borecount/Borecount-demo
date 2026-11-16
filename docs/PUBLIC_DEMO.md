@@ -85,6 +85,8 @@ project. Runtime/cleanup must have no role memberships, including `neon_superuse
 Use **direct** Neon connection URLs (hostname without `-pooler`) with `sslmode=verify-full`.
 This verifies the certificate/hostname instead of merely requesting encryption. Keep migrations
 and cleanup on direct connections; pooled/session behavior is outside this profile's validation.
+Cleanup accepts only the `sslmode` URL option. It rejects `channel_binding` explicitly because
+this adapter does not implement that requirement; it never silently strips it and claims support.
 See [Neon pooling limits](https://neon.com/docs/connect/connection-pooling).
 
 From the exact host release, set `DATABASE_URL` securely to a managed admin allowed to
@@ -116,7 +118,8 @@ Web settings:
 - `DATABASE_URL`: direct verified-TLS URL as `borecount_demo_runtime`.
 - `PUBLIC_DEMO_CLEANUP_DATABASE_URL`: separate direct verified-TLS URL as `borecount_demo_cleanup`.
 - `PUBLIC_DEMO_CLEANUP_ENABLED=true`: embedded worker switch, used only with `PUBLIC_DEMO=true`.
-  Set false to disable the worker for rollback; private/local profiles never require its secret.
+  Only exact `true`/`false` values are accepted; omitted defaults to true in the public profile.
+  Typos fail startup. Set false to disable the worker for rollback; private/local profiles never require its secret.
 - `JWT_SIGNING_KEY`: independent unpadded base64url encoding of 32+ random bytes.
 - `PUBLIC_DEMO=true`, `TRUSTED_PROXY_CIDRS=127.0.0.1/32`, bounded pool of 5 connections.
 - `RENDER_TRUSTED_PROXY_CIDRS`: only verified immediate Render ingress peer IPs/CIDRs. Empty
@@ -217,7 +220,10 @@ lock timeouts and the 5-connection pool also apply. See [OPERATIONS.md](OPERATIO
 
 The worker opens at most one short-lived cleanup-role connection per check and closes it before
 sleeping. At startup it validates the exact database/role/direct verified-TLS URL, reads the expected
-marker and valid persisted `next_reset_at`, then sleeps on one absolute-deadline timer. Normal
+marker and valid persisted `next_reset_at`, and samples `clock_timestamp()` in the same query.
+It calculates the remaining delay using database time, then uses a relative timer and monotonic
+elapsed time (including connection shutdown) so container wall-clock offsets/jumps do not move the
+scheduled attempt. No database functions or grants need changing. Normal
 operation does not poll every minute/five minutes. At a due deadline it invokes only
 `demo_ops.cleanup_due()`; PostgreSQL time, marker, schema/identity guards and advisory lock remain
 authoritative. The function atomically truncates **all reviewed financial/session tables of this
@@ -228,19 +234,26 @@ credentials fail closed. Cleanup has no direct table/TRUNCATE or role-management
 
 After each invocation the worker rereads status, including after a query failure. A newly advanced
 deadline from either worker is used unchanged; failures, busy lock, or a still-due deadline retry
-in five minutes. Invalid/missing marker/status never authorizes reset. Early clock-skew timers
+in five minutes. Invalid/missing marker/status/database time never authorizes reset. Early timers
 reschedule the future persisted deadline. Attempts do not overlap and have a 45-second deadline;
 shutdown clears timers and closes the connection. SIGTERM/SIGINT and unexpected child exits are
 supervised, with a bounded termination/kill fallback for all remaining processes.
 
 The reset can briefly lock tables/end sessions. `/ready` and `/demo/availability` retain their
-15-minute overdue grace; admission exhaustion may fail availability while readiness stays healthy.
+15-minute overdue grace, evaluated with database time rather than the container wall clock;
+admission exhaustion may fail availability while readiness stays healthy.
 A stopped/unhealthy Render container cannot run this scheduler; restart inspects the stored deadline
-and recovers overdue work. This remains a disposable demo without HA or production SLA.
+and recovers overdue work. This is not a hard real-time guarantee: process suspension, event-loop
+stalls or changes to the database clock during sleep can affect timing. The worker rereads database
+time when it wakes, without introducing periodic DB polling. This remains a disposable demo
+without HA or production SLA.
 
 Safe structured events include startup, scheduled deadline, attempt start/lateness, retry, check,
 reset, failure and shutdown. Diagnostics contain only allowlisted codes/categories and timestamps,
-never raw exceptions, messages, SQL, credentials or URLs. Monitor retries and overdue attempt starts.
+never raw exceptions, messages, SQL, credentials or URLs. Attempt events include `database_at` and
+database-relative `lateness_ms`; `at`/`scheduled_at` are host-clock diagnostics. Cleanup errors are
+logged before rereading status, so a second failure cannot hide the initial code/category.
+Monitor retries and overdue attempt starts.
 Database admission limits do not bound exact storage bytes:
 monitor Neon database growth and WAL/history-retention usage; logical reset does not remove the
 provider's retained backup/history immediately. No real data is permitted in this environment.

@@ -89,7 +89,10 @@ Local evidence:
 
 - Deterministic clock/timer tests cover future deadlines without polling, overdue startup,
   persisted rescheduling, retry/error/lock-busy-equivalent false results, competing workers,
-  clock skew, invalid marker/status, attempt timeout and shutdown.
+  container clock offsets/jumps against sampled DB time and monotonic elapsed time,
+  invalid marker/status/database time, attempt timeout and shutdown. Regressions cover paired
+  cleanup/status failures without losing the original diagnostic, invalid switch values and
+  explicit rejection of unsupported channel-binding URL options.
 - Real child-process tests cover environment secret canaries, private/public launch profiles,
   all required child exit/spawn failures, signals and bounded forced shutdown.
 - Both fresh and upgrade fixtures pass in a disposable local PostgreSQL 16 cluster: real

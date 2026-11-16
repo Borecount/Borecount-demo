@@ -4,22 +4,26 @@ import { createCleanupScheduler, RETRY_MS, ATTEMPT_MS } from '../../scripts/publ
 import { validateCleanupUrl } from '../../scripts/public-cleanup-db.mjs';
 
 const marker = 'borecount-disposable-public-demo';
-const status = (deadline, purpose = marker) => ({ purpose, next_reset_at: new Date(deadline).toISOString() });
+const status = (deadline, purpose = marker, databaseNow) => ({
+  purpose, next_reset_at: new Date(deadline).toISOString(),
+  ...(databaseNow === undefined ? {} : { database_now: new Date(databaseNow).toISOString() }),
+});
 
 function harness(initial = 0) {
-  let time = initial, nextId = 1;
+  let wallTime = initial, monotonicTime = initial, nextId = 1;
   const timers = new Map();
   const logs = [];
   const setTimer = (fn, delay) => {
     const id = nextId++;
-    timers.set(id, { fn, at: time + delay });
+    timers.set(id, { fn, at: monotonicTime + delay });
     return id;
   };
   const clearTimer = id => timers.delete(id);
   const advance = async ms => {
-    time += ms;
+    wallTime += ms;
+    monotonicTime += ms;
     for (;;) {
-      const entry = [...timers].find(([, t]) => t.at <= time);
+      const entry = [...timers].find(([, t]) => t.at <= monotonicTime);
       if (!entry) break;
       const [id, timer] = entry;
       timers.delete(id);
@@ -32,10 +36,26 @@ function harness(initial = 0) {
     for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
   };
   const scheduler = connect => createCleanupScheduler({
-    connect, now: () => time, setTimer, clearTimer,
+    connect: () => {
+      const connection = connect();
+      const readStatus = connection.status.bind(connection);
+      return { ...connection, status: async () => {
+        const value = await readStatus();
+        if (value && typeof value === 'object' && !Object.hasOwn(value, 'database_now')) {
+          return { ...value, database_now: new Date(monotonicTime).toISOString() };
+        }
+        return value;
+      } };
+    },
+    now: () => wallTime, monotonicNow: () => monotonicTime, setTimer, clearTimer,
     log: line => logs.push(JSON.parse(line)),
   });
-  return { scheduler, logs, timers, advance, flush, now: () => time };
+  return {
+    scheduler, logs, timers, advance, flush,
+    now: () => wallTime, monotonic: () => monotonicTime,
+    jumpWall: ms => { wallTime += ms; },
+    setMonotonic: value => { monotonicTime = value; },
+  };
 }
 
 test('future deadline sleeps on one exact timer, closes the check connection, and does not poll', async () => {
@@ -156,6 +176,96 @@ test('an early timer caused by clock skew rechecks status and never cleans early
   await scheduler.stop();
 });
 
+for (const offset of [-6 * 60 * 60_000, 6 * 60 * 60_000]) {
+  test(`container wall clock ${offset < 0 ? 'behind' : 'ahead'} by hours does not change DB deadline`, async () => {
+    const h = harness(6_250_000), databaseNow = h.monotonic(), deadline = databaseNow + 40_000;
+    let checks = 0, cleanups = 0;
+    h.jumpWall(offset);
+    const scheduler = h.scheduler(() => ({
+      status: async () => { checks++; return status(deadline, marker, databaseNow); },
+      cleanup: async () => { cleanups++; return true; }, close: async () => {},
+    }));
+    await scheduler.start();
+    assert.equal(cleanups, 0);
+    assert.equal(checks, 1);
+    assert.equal([...h.timers.values()][0].at, databaseNow + 40_000);
+    await scheduler.stop();
+
+    const dueHarness = harness(6_500_000), dueDbNow = dueHarness.monotonic();
+    dueHarness.jumpWall(-offset);
+    let dueCleanups = 0;
+    const dueScheduler = dueHarness.scheduler(() => ({
+      status: async () => status(dueDbNow - 1, marker, dueDbNow),
+      cleanup: async () => { dueCleanups++; return true; }, close: async () => {},
+    }));
+    await dueScheduler.start();
+    assert.equal(dueCleanups, 1, 'DB due state controls cleanup despite wall clock offset');
+    await dueScheduler.stop();
+  });
+}
+
+test('wall jumps during the DB check and sleep do not cause polling or shift the monotonic deadline', async () => {
+  const h = harness(6_750_000), databaseNow = h.monotonic(), deadline = databaseNow + 70_000;
+  let checks = 0, closes = 0;
+  const scheduler = h.scheduler(() => ({
+    status: async () => { checks++; return status(deadline, marker, databaseNow); },
+    cleanup: async () => assert.fail('deadline is in the future'),
+    close: async () => { closes++; h.jumpWall(8 * 60 * 60_000); },
+  }));
+  await scheduler.start();
+  assert.equal(checks, 1);
+  assert.equal(closes, 1);
+  assert.equal([...h.timers.values()][0].at, databaseNow + 70_000);
+  h.jumpWall(-16 * 60 * 60_000);
+  await h.advance(69_999);
+  assert.equal(checks, 1, 'no intermediate DB polling');
+  assert.equal([...h.timers.values()][0].at, deadline);
+  await h.advance(1);
+  assert.equal(checks, 2, 'status is read only when the monotonic timer reaches the DB interval');
+  await scheduler.stop();
+});
+
+test('missing or invalid database time performs no cleanup and retries safely', async t => {
+  for (const [label, databaseNow] of [['missing', undefined], ['invalid', 'not-a-date']]) {
+    await t.test(label, async () => {
+      const h = harness(6_900_000); let cleanups = 0;
+      const badStatus = { ...status(h.now() - 1) };
+      badStatus.database_now = databaseNow;
+      const scheduler = h.scheduler(() => ({
+        status: async () => badStatus,
+        cleanup: async () => { cleanups++; return true; }, close: async () => {},
+      }));
+      await scheduler.start();
+      assert.equal(cleanups, 0);
+      assert.equal([...h.timers.values()][0].at, h.monotonic() + RETRY_MS);
+      assert.ok(h.logs.some(x => x.event === 'sandbox_cleanup_failed' && x.code === 'INVALID_STATUS'));
+      await scheduler.stop();
+    });
+  }
+});
+
+test('cleanup error is logged even when the follow-up status read also fails', async () => {
+  const h = harness(6_950_000), due = h.monotonic() - 1;
+  let reads = 0;
+  const scheduler = h.scheduler(() => ({
+    status: async () => {
+      if (++reads === 1) return status(due, marker, due + 1);
+      throw Object.assign(new Error('secondary secret'), { code: 'ETIMEDOUT' });
+    },
+    cleanup: async () => { throw Object.assign(new Error('cleanup secret'), { code: 'ECONNRESET' }); },
+    close: async () => {},
+  }));
+  await scheduler.start();
+  const failures = h.logs.filter(x => x.event === 'sandbox_cleanup_failed');
+  assert.deepEqual(failures.map(x => [x.code, x.category]), [
+    ['ECONNRESET', 'connection'], ['ETIMEDOUT', 'connection_timeout'],
+  ]);
+  const output = JSON.stringify(failures);
+  assert.equal(output.includes('secret'), false);
+  assert.equal([...h.timers.values()][0].at, h.monotonic() + RETRY_MS);
+  await scheduler.stop();
+});
+
 test('invalid marker or date is safe, performs no cleanup, and retries', async t => {
   for (const [label, bad] of [['marker', status(9_000_000, 'wrong-purpose')], ['date', { purpose: marker, next_reset_at: 'not-a-date' }]]) {
     await t.test(label, async () => {
@@ -236,6 +346,9 @@ test('cleanup URL guard rejects unsafe endpoints and scheduler logs never expose
     'postgres://borecount_demo_cleanup:secret@db.example/other?sslmode=verify-full',
     'postgres://borecount_demo_cleanup:secret@db.example/luxledger_demo_hosted?sslmode=require',
     'postgres://borecount_demo_cleanup:secret@db.example/luxledger_demo_hosted?sslmode=verify-full&statement_timeout=0',
+    'postgres://borecount_demo_cleanup:secret@db.example/luxledger_demo_hosted?sslmode=verify-full&channel_binding=require',
+    'postgres://borecount_demo_cleanup:secret@db.example/luxledger_demo_hosted?sslmode=verify-full&channel_binding=prefer',
+    'postgres://borecount_demo_cleanup:secret@db.example/luxledger_demo_hosted?sslmode=verify-full&channel_binding=disable',
   ]) assert.throws(() => validateCleanupUrl(url), { code: 'CONFIGURATION_INVALID' });
 
   const h = harness(10_000_000), secret = 'postgresql://user:password@host/db SELECT secret';

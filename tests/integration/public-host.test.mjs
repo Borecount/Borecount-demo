@@ -17,6 +17,7 @@ const created = [];
 const upgrading = process.argv.includes("--upgrade");
 let owner, runtime, cleanup, canary, server;
 let legacyRoleCreated = false;
+const originalDateNow = Date.now;
 const passwords = Object.fromEntries(['owner', 'runtime', 'cleanup'].map(name => [name, randomBytes(32).toString('hex')]));
 const url = (database, role = target.username, password = target.password) => {
   const next = new URL(target); next.pathname = `/${database}`; next.username = role; next.password = password; return next.href;
@@ -71,7 +72,7 @@ try {
   canary = postgres(url('public_host_canary'), { max: 1 });
   await canary`create table private_canary (value text)`;
   await canary`insert into private_canary values ('untouched')`;
-  const [{ createServerCore, registerApplication, canonicalOpenApi }, { registerSandbox }, { HostProtection }, { assertPublicHost, assertSandboxCapacity }] = await Promise.all([
+  const [{ createServerCore, registerApplication, canonicalOpenApi }, { registerSandbox }, { HostProtection }, { assertPublicHost, assertPublicReadiness, assertSandboxCapacity }] = await Promise.all([
     tsImport('../../apps/api/src/api/server.ts', options), tsImport('../../apps/api/src/demo/sandbox.ts', options),
     tsImport('../../apps/api/src/api/resource-protection/host-protection.ts', options), tsImport('../../apps/api/src/demo/public-host.ts', options),
   ]);
@@ -146,17 +147,22 @@ try {
   }
   const services = createApplicationServices(runtime);
   const protection = new HostProtection();
-  server = createServerCore({ logger: false, readinessCheck: async () => {
-    await runtime.sql`select 1`;
-    const [state] = await runtime.sql`select demo_ops.public_status() as status`;
-    if (!state?.status || Date.parse(state.status.next_reset_at) < Date.now() - 900_000) throw new Error('Public sandbox cleanup is overdue');
-  } });
+  server = createServerCore({ logger: false, readinessCheck: () => assertPublicReadiness(runtime) });
   registerApplication(server, { services, jwtAuth, protection, authorizeAdjustment: false });
   const publicLimits = { maxTenants: upgrading ? 3 : 2, hourlyCreates: upgrading ? 3 : 2 };
   registerSandbox(server, runtime, services, jwtAuth, { protection, specification: canonicalOpenApi }, publicLimits);
   const start = () => server.inject({ method: 'POST', url: '/demo/session', headers: { host: 'demo.test', origin: 'https://demo.test' } });
   const expect = (response, status) => { assert.equal(response.statusCode, status, response.body); return response.json(); };
   const admissions = async () => [...await owner`select * from demo_ops.sandbox_admissions order by tenant_id`];
+  await owner`update demo_ops.state set next_reset_at = now() + interval '10 minutes'`;
+  Date.now = () => originalDateNow() + 6 * 60 * 60 * 1000;
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 200);
+  Date.now = () => originalDateNow() - 6 * 60 * 60 * 1000;
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 200);
+  Date.now = originalDateNow;
+  await owner`update demo_ops.state set next_reset_at = now() - interval '14 minutes'`;
+  expect(await server.inject({ method: 'GET', url: '/ready' }), 200);
+  await owner`update demo_ops.state set next_reset_at = ${before[0].next_reset_at}`;
   const availabilityBefore = await admissions();
   for (let i = 0; i < 3; i++) expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 200);
   assert.deepEqual(await admissions(), availabilityBefore, 'Availability must not consume admission quota');
@@ -199,7 +205,9 @@ try {
   // A non-sandbox tenant makes destructive cleanup fail closed, even with a due deadline.
   await owner`insert into tenants (id, name) values ('00000000-0000-4000-8000-000000000133', 'Do not reset')`;
   await owner`update demo_ops.state set next_reset_at = now() - interval '16 minutes'`;
+  Date.now = () => originalDateNow() - 6 * 60 * 60 * 1000;
   expect(await server.inject({ method: 'GET', url: '/ready' }), 503);
+  Date.now = originalDateNow;
   expect(await server.inject({ method: 'GET', url: '/demo/availability' }), 503);
   await assert.rejects(() => cleanup`select demo_ops.cleanup_due()`);
   const refusedWorker = spawnSync(process.execPath, ['scripts/public-demo-cleanup.mjs'], {
@@ -252,6 +260,7 @@ try {
   assert.deepEqual([...await canary`select value from private_canary`], [{ value: 'untouched' }]);
   console.log((upgrading ? 'Existing demo upgrade preserved balances/history. ' : '') + 'Public host passed: unprivileged migration/runtime, RLS, seed cap, posting/retry, fixed-target cleanup, token invalidation, non-sandbox refusal and inaccessible canary');
 } finally {
+  Date.now = originalDateNow;
   await server?.close();
   await Promise.all([owner?.end({ timeout: 5 }), runtime?.sql.end({ timeout: 5 }), cleanup?.end({ timeout: 5 }), canary?.end({ timeout: 5 })]);
   for (const database of created.reverse()) await admin.unsafe(`DROP DATABASE ${database} WITH (FORCE)`);

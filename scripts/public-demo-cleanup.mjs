@@ -1,6 +1,6 @@
 // Scheduled cleanup: one bounded run, no HTTP listener, no owner/production credential.
 import { cleanupConnection, validateCleanupUrl } from './public-cleanup-db.mjs';
-import { resetDeadline } from './public-demo-scheduler-core.mjs';
+import { databaseTime, resetDeadline } from './public-demo-scheduler-core.mjs';
 import { safeDatabaseFailure } from './safe-db-error.mjs';
 let db;
 try { db = cleanupConnection(validateCleanupUrl(process.env.DATABASE_URL)); }
@@ -16,7 +16,8 @@ deadline.unref();
 try {
   resetDeadline(await db.status());
   const reset = await db.cleanup();
-  if (resetDeadline(await db.status()) < Date.now() - 900_000) throw Object.assign(new Error(), { code: 'CLEANUP_OVERDUE' });
+  const status = await db.status();
+  if (resetDeadline(status) < databaseTime(status) - 900_000) throw Object.assign(new Error(), { code: 'CLEANUP_OVERDUE' });
   console.log(JSON.stringify({ event: reset ? 'sandbox_database_reset' : 'sandbox_cleanup_checked', at: new Date().toISOString() }));
 } catch (error) {
   console.error(JSON.stringify({ event: 'sandbox_cleanup_failed', ...safeDatabaseFailure(error), at: new Date().toISOString() }));

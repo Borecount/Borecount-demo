@@ -60,6 +60,39 @@ test('profiles launch only the authorized worker and require its credential', ()
   assert.equal(childSpecifications({ PUBLIC_DEMO: 'true', PUBLIC_DEMO_CLEANUP_ENABLED: 'false' }).length, 2);
   assert.throws(() => childSpecifications({ PUBLIC_DEMO: 'true' }), /credential/);
   assert.equal(childSpecifications(fixtureEnv).length, 3);
+  assert.equal(childSpecifications({ ...fixtureEnv, PUBLIC_DEMO_CLEANUP_ENABLED: 'true' }).length, 3);
+});
+
+test('private profiles ignore malformed cleanup flags without a cleanup credential', () => {
+  for (const value of ['', 'TRUE', 'True', '0', '1', 'tru', ' true ', ' ']) {
+    assert.equal(childSpecifications({ PUBLIC_DEMO: 'false', PUBLIC_DEMO_CLEANUP_ENABLED: value }).length, 2);
+    assert.equal(childSpecifications({ PUBLIC_DEMO_CLEANUP_ENABLED: value }).length, 2);
+  }
+});
+
+for (const value of ['', 'TRUE', 'True', '0', '1', 'tru', ' true ', ' ']) {
+  test(`public profile rejects cleanup flag ${JSON.stringify(value)} before spawning children`, { timeout: 5000 }, async t => {
+    const run = launch({ env: { ...fixtureEnv, PUBLIC_DEMO_CLEANUP_ENABLED: value } });
+    t.after(() => run.child.kill('SIGKILL'));
+    const result = await run.done;
+    assert.equal(result.code, 1);
+    assert.match(result.errors, /PUBLIC_DEMO_CLEANUP_ENABLED must be true or false/);
+    assert.deepEqual(run.records(), []);
+  });
+}
+
+test('CLI rejects a malicious cleanup flag without echoing its contents or credentials', { timeout: 5000 }, async () => {
+  const flag = 'malicious-flag-canary\ncredential-injected-log';
+  const child = spawn(process.execPath, [new URL('../../deploy/render-supervisor.mjs', import.meta.url).pathname], {
+    env: { ...fixtureEnv, PUBLIC_DEMO_CLEANUP_ENABLED: flag },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  assert.equal((await once(child, 'exit'))[0], 1);
+  assert.equal(output, 'Render supervisor configuration failed; verify cleanup configuration\n');
+  for (const secret of [flag, 'malicious-flag-canary', 'runtime-canary', 'cleanup-canary', 'jwt-canary']) assert.equal(output.includes(secret), false);
 });
 
 test('real children receive isolated credential environments', { timeout: 5000 }, async t => {

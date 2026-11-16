@@ -16,6 +16,14 @@ export function parseSandboxLimits(env: NodeJS.ProcessEnv) {
 // Shared by provisioning and the disposable database reset. Not a financial lock.
 export const SANDBOX_LIFECYCLE_LOCK = 133_132;
 
+/** Same database clock and 15-minute grace as sandbox admission. */
+export async function assertPublicReadiness(db: DbClient) {
+  const [state] = await db.sql`select coalesce(
+    (demo_ops.public_status()->>'next_reset_at')::timestamptz >= clock_timestamp() - interval '15 minutes',
+    false) as healthy`;
+  if (state?.healthy !== true) throw new Error('Public sandbox cleanup is overdue');
+}
+
 export async function assertPublicHost(db: DbClient, databaseUrl?: string) {
   if (databaseUrl) {
     const target = new URL(databaseUrl);

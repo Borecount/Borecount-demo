@@ -10,9 +10,14 @@ export function resetDeadline(status) {
   if (!Number.isFinite(deadline)) throw Object.assign(new Error(), { code: 'INVALID_STATUS' });
   return deadline;
 }
+export function databaseTime(status) {
+  const time = typeof status?.database_now === 'string' ? Date.parse(status.database_now) : NaN;
+  if (!Number.isFinite(time)) throw Object.assign(new Error(), { code: 'INVALID_STATUS' });
+  return time;
+}
 
 /** One connection per bounded check; one timer while sleeping; DB owns all deletion decisions. */
-export function createCleanupScheduler({ connect, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = console.log }) {
+export function createCleanupScheduler({ connect, now = Date.now, monotonicNow = () => performance.now(), setTimer = setTimeout, clearTimer = clearTimeout, log = console.log }) {
   let stopped = false, started = false, timer, active, connection, closeConnection;
   const emit = (event, fields = {}) => log(JSON.stringify({ event, at: new Date(now()).toISOString(), ...fields }));
   function schedule(delay, deadline) {
@@ -24,24 +29,36 @@ export function createCleanupScheduler({ connect, now = Date.now, setTimer = set
       ...(deadline === undefined ? {} : { next_reset_at: new Date(deadline).toISOString() }),
     });
   }
+  async function readTiming() {
+    const status = await connection.status();
+    const deadline = resetDeadline(status);
+    const databaseNow = databaseTime(status);
+    // Relative Node timers use elapsed time; wall-clock offsets/jumps must not move the run.
+    return { deadline, databaseNow, wakeAt: monotonicNow() + deadline - databaseNow };
+  }
   async function check(signal) {
     connection = connect();
     let closing;
     closeConnection = () => closing ??= Promise.resolve().then(() => connection.close());
-    const deadline = resetDeadline(await connection.status());
+    const timing = await readTiming();
     if (signal.aborted || stopped) return;
-    if (deadline > now()) return deadline;
-    emit('sandbox_cleanup_attempt', { next_reset_at: new Date(deadline).toISOString(), lateness_ms: Math.max(0, now() - deadline) });
-    let reset, failure;
-    try { reset = await connection.cleanup(); } catch (error) { failure = error; }
+    if (timing.deadline > timing.databaseNow) return timing;
+    emit('sandbox_cleanup_attempt', {
+      next_reset_at: new Date(timing.deadline).toISOString(),
+      database_at: new Date(timing.databaseNow).toISOString(),
+      lateness_ms: Math.max(0, timing.databaseNow - timing.deadline),
+    });
+    let reset;
+    try { reset = await connection.cleanup(); } catch (error) {
+      if (!signal.aborted && !stopped) emit('sandbox_cleanup_failed', { ...safeDatabaseFailure(error), operation: 'cleanup' });
+    }
     if (signal.aborted || stopped) return;
     // Even an unsuccessful invocation can race a successful external worker.
-    const next = resetDeadline(await connection.status());
+    const next = await readTiming();
     if (signal.aborted || stopped) return;
-    if (failure) emit('sandbox_cleanup_failed', safeDatabaseFailure(failure));
-    if (reset === true) emit('sandbox_database_reset', { next_reset_at: new Date(next).toISOString() });
-    else emit('sandbox_cleanup_checked', { next_reset_at: new Date(next).toISOString() });
-    return next > now() ? next : undefined;
+    if (reset === true) emit('sandbox_database_reset', { next_reset_at: new Date(next.deadline).toISOString() });
+    else emit('sandbox_cleanup_checked', { next_reset_at: new Date(next.deadline).toISOString() });
+    return next.deadline > next.databaseNow ? next : undefined;
   }
   function run() {
     if (stopped || active) return active;
@@ -69,7 +86,7 @@ export function createCleanupScheduler({ connect, now = Date.now, setTimer = set
         }
         connection = closeConnection = undefined;
       }
-      if (!stopped) schedule(next === undefined ? RETRY_MS : next - now(), next);
+      if (!stopped) schedule(next === undefined ? RETRY_MS : next.wakeAt - monotonicNow(), next?.deadline);
     })().finally(() => { active = undefined; });
     return active;
   }

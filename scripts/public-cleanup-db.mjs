@@ -10,7 +10,7 @@ export function validateCleanupUrl(value) {
     if (!local && target.searchParams.get('sslmode') !== 'verify-full') throw new Error();
     // Do not let URL options override TLS, role, timeouts or connection limits.
     for (const key of target.searchParams.keys()) {
-      if (!['sslmode', 'channel_binding'].includes(key) || target.searchParams.getAll(key).length !== 1) throw new Error();
+      if (key !== 'sslmode' || target.searchParams.getAll(key).length !== 1) throw new Error();
     }
     return target;
   } catch {
@@ -30,7 +30,10 @@ export function cleanupConnection(target) {
     connection: { application_name: 'public-demo-cleanup', statement_timeout: 30000, lock_timeout: 2000 },
   });
   return {
-    async status() { return (await sql`select demo_ops.public_status() as status`)[0]?.status; },
+    async status() {
+      return (await sql`select demo_ops.public_status() ||
+        jsonb_build_object('database_now', clock_timestamp()) as status`)[0]?.status;
+    },
     async cleanup() { return (await sql`select demo_ops.cleanup_due() as reset`)[0]?.reset; },
     close() { return sql.end({ timeout: 0 }); },
   };
