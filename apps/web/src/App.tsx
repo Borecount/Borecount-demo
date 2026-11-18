@@ -86,13 +86,6 @@ export function App() {
         <p className="hero-note">
           Built for Node.js teams · PostgreSQL-backed · Framework-agnostic core
         </p>
-        <p className="sandbox-notice" role="note">
-          Simulated test data only. Do not enter customer data, secrets, or real payment details.
-          Sessions expire after eight hours; hosted sandboxes may reset earlier and are erased
-          daily in the public deployment. No uptime guarantee.
-          {' '}<a href="/guides/index.html">Free self-hosting guides</a> or{' '}
-          <a href="mailto:herman.klushin@gmail.com?subject=Borecount%20pilot%20request">discuss a manually approved pilot</a>.
-        </p>
       </section>
       <div className="proof-strip hero-proof">
         <div>
@@ -350,6 +343,14 @@ export function App() {
             </div>
           </details>
         )}
+
+        <p className="sandbox-notice" role="note">
+          Simulated test data only. Do not enter customer data, secrets, or real payment details.
+          Sessions expire after eight hours; hosted sandboxes may reset earlier and are erased
+          daily in the public deployment. No uptime guarantee.
+          {' '}<a href="/guides/index.html">Free self-hosting guides</a> or{' '}
+          <a href="mailto:herman.klushin@gmail.com?subject=Borecount%20pilot%20request">discuss a manually approved pilot</a>.
+        </p>
 
         <ExecutionJournal
           records={journal.records}
