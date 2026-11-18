@@ -102,7 +102,7 @@ test('holds use one public cursor list with state filters that start without a c
   await preset(page, 'Reserve payment');
   await expect(rows).toHaveCount(2);
 
-  const ledgerId = await page.getByLabel('Ledger').inputValue();
+  const ledgerId = await page.getByLabel('Ledger', { exact: true }).inputValue();
   const assertHoldQuery = (urlText: string, state?: string) => {
     const url = new URL(urlText);
     expect(url.pathname).toBe('/v1/holds');

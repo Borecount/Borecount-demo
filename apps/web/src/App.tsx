@@ -91,7 +91,7 @@ export function App() {
         </div>
         <LedgerExample />
       </section>
-      <div className="proof-strip hero-proof" aria-label="Posting guarantees">
+      <div className="proof-strip hero-proof" aria-label="Ledger guarantees">
         <div>
           <span className="proof-metric" aria-label="Zero difference">Δ0.00</span>
           <strong>Balanced & atomic</strong>
