@@ -86,13 +86,6 @@ export function App() {
         <p className="hero-note">
           Built for Node.js teams · PostgreSQL-backed · Framework-agnostic core
         </p>
-        <p className="sandbox-notice" role="note">
-          Simulated test data only. Do not enter customer data, secrets, or real payment details.
-          Sessions expire after eight hours; hosted sandboxes may reset earlier and are erased
-          daily in the public deployment. No uptime guarantee.
-          {' '}<a href="/guides/index.html">Free self-hosting guides</a> or{' '}
-          <a href="mailto:herman.klushin@gmail.com?subject=Borecount%20pilot%20request">discuss a manually approved pilot</a>.
-        </p>
       </section>
       <div className="proof-strip hero-proof">
         <div>
@@ -112,28 +105,6 @@ export function App() {
           <span>provider matching and reports</span>
         </div>
       </div>
-      <section className="integration-mode" aria-label="Integration mode">
-        <div>
-          <strong>Integration mode</strong>
-          <p>
-            {mode === 'rest'
-              ? 'Explore every workflow through the REST API.'
-              : 'Calls the library directly on the demo server. Shares your current sandbox.'}
-          </p>
-        </div>
-        <div className="mode-switch" role="group" aria-label="Integration mode">
-          <button aria-pressed={mode === 'rest'} disabled={busy} onClick={() => switchMode('rest')}>
-            REST API
-          </button>
-          <button
-            aria-pressed={mode === 'library'}
-            disabled={busy}
-            onClick={() => switchMode('library')}
-          >
-            Library
-          </button>
-        </div>
-      </section>
       <section className="flow-guide" id="flows" aria-label="Guided demo flows">
         <div className="flow-guide-heading">
           <div className="section-intro compact">
@@ -218,6 +189,28 @@ export function App() {
               </button>
             </div>
           </div>
+          <section className="integration-mode" aria-label="Integration mode">
+            <div>
+              <strong>Integration mode</strong>
+              <p>
+                {mode === 'rest'
+                  ? 'Explore every workflow through the REST API.'
+                  : 'Calls the library directly on the demo server. Shares your current sandbox.'}
+              </p>
+            </div>
+            <div className="mode-switch" role="group" aria-label="Integration mode">
+              <button aria-pressed={mode === 'rest'} disabled={busy} onClick={() => switchMode('rest')}>
+                REST API
+              </button>
+              <button
+                aria-pressed={mode === 'library'}
+                disabled={busy}
+                onClick={() => switchMode('library')}
+              >
+                Library
+              </button>
+            </div>
+          </section>
         </div>
         <div className="workspace-controls">
           <div className="workspace-ledger">
@@ -350,6 +343,14 @@ export function App() {
             </div>
           </details>
         )}
+
+        <p className="sandbox-notice" role="note">
+          Simulated test data only. Do not enter customer data, secrets, or real payment details.
+          Sessions expire after eight hours; hosted sandboxes may reset earlier and are erased
+          daily in the public deployment. No uptime guarantee.
+          {' '}<a href="/guides/index.html">Free self-hosting guides</a> or{' '}
+          <a href="mailto:herman.klushin@gmail.com?subject=Borecount%20pilot%20request">discuss a manually approved pilot</a>.
+        </p>
 
         <ExecutionJournal
           records={journal.records}

@@ -9,7 +9,7 @@ services:
     plan: 0.5c-512mb
     numInstances: 1
     autoDeployTrigger: off
-    healthCheckPath: /ready
+    healthCheckPath: /health # Process liveness only; never wake Neon here.
     maxShutdownDelaySeconds: 30
     domains:
       - borecount.dev
@@ -29,7 +29,7 @@ services:
       - key: DB_POOL_MAX
         value: "5"
       - key: DB_CONNECT_TIMEOUT
-        value: "5"
+        value: "15"
       - key: DB_IDLE_TIMEOUT
         value: "20"
       - key: SHUTDOWN_TIMEOUT_MS

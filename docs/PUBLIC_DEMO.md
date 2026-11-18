@@ -124,7 +124,7 @@ Web settings:
 - `PUBLIC_DEMO=true`, `TRUSTED_PROXY_CIDRS=127.0.0.1/32`, bounded pool of 5 connections.
 - `RENDER_TRUSTED_PROXY_CIDRS`: only verified immediate Render ingress peer IPs/CIDRs. Empty
   safely ignores incoming forwarding chains and shares the ingress IP's abuse/session budget.
-- `VITE_PUBLIC_URL=https://borecount.dev/` (build input), `/ready` health check, one instance,
+- `VITE_PUBLIC_URL=https://borecount.dev/` (build input), `/health` process health check, one instance,
   0.5 CPU / 512 MiB service plan, 30-second shutdown allowance.
 
 Credential map:
@@ -153,7 +153,8 @@ Credential map:
    serializes reset, and the worker rereads the persisted deadline after each invocation. Once the
    embedded worker is verified, set the **GitHub Actions variable**
    `PUBLIC_DEMO_CLEANUP_ENABLED=false`. This variable is separate from Render's same-named switch.
-   Do not disable the external read-only `Public demo availability` monitor.
+   Keep `Public demo availability` enabled: two daily database-free checks and one daily
+   database readiness/admission check, spaced eight hours apart.
 4. Record `sandbox_cleanup_attempt.at`, `next_reset_at`, and `lateness_ms` for the first scheduled
    attempt (target: starts within 60 seconds while the container is healthy), separately from
    `sandbox_database_reset.at` and the following persisted deadline. Record public HTTPS/readiness/
@@ -165,8 +166,8 @@ Credential map:
 Retain `.github/workflows/public-cleanup.yml`, its cleanup secret and the portable cleanup image
 as operator recovery tools. For recovery, temporarily set the **Actions variable**
 `PUBLIC_DEMO_CLEANUP_ENABLED=true`, manually dispatch **Public demo cleanup** on main, inspect the
-sanitized result/new deadline, then set that variable false again. Both manual and scheduled runs
-use this opt-in; enabling it also temporarily enables its five-minute schedule. The script resets
+sanitized result/new deadline, then set that variable false again. Manual runs use this opt-in;
+there is no Actions cleanup schedule. The script resets
 all disposable demo data if due, so it is not a connectivity probe. GitHub scheduling is best effort
 and is not the primary timing guarantee.
 
@@ -263,7 +264,8 @@ provider's retained backup/history immediately. No real data is permitted in thi
 ```sh
 # PUBLIC_DEMO_URL must be the actual HTTPS origin; EXPECTED_RELEASE_SHA is optional but recommended.
 npm run smoke:public
-npm run monitor:public
+npm run monitor:public # Explicit DB readiness/admission check; wakes Neon.
+node scripts/public-demo-smoke.mjs --liveness # Frequent monitoring; no DB queries.
 ```
 
 Full smoke creates two disposable sessions and verifies HTTPS probes, versioned docs/contract,
@@ -274,17 +276,60 @@ returns 503 if retained-tenant or rolling-hour capacity is exhausted, even when 
 healthy. Both endpoints also fail when cleanup is more than 15 minutes overdue. The probe
 creates/reserves no sandbox and consumes no creation quota. It is a current capacity snapshot, not a reservation for a future request.
 
-Set repository variable `PUBLIC_DEMO_URL` to enable the 15-minute **Public demo availability**
-workflow. Enable operator GitHub Actions failure notifications for monitoring/cleanup and Render web deploy
+Set repository variable `PUBLIC_DEMO_URL` to enable **Public demo availability** every eight
+hours: 00:17 and 16:17 UTC check `/health`, landing page and documentation without DB queries;
+08:17 UTC also checks `/ready` and `/demo/availability`. This totals three scheduled runs daily,
+only one of which wakes Neon. GitHub schedules are best effort and may run late. Manual dispatch
+defaults to the read-only DB check, with an optional full smoke. Daily database failures can therefore take up to
+24 hours to appear in Actions; `/health` success does not establish database readiness. Enable
+operator GitHub Actions failure notifications for monitoring/cleanup and Render web deploy
 notifications. A missing URL deliberately disables network checks. Verify actual notification
-delivery; repository configuration alone does not establish an operating alert channel.
+delivery; repository configuration alone does not establish an operating alert channel. A failed
+check exits nonzero and marks the Actions run failed; it does not restart, deploy or repair the
+service. The logs identify the failed step without credentials or payloads.
 
-Render's `/ready` HTTP health checks gate deployment and restart unhealthy web instances; the
+Render's `/health` HTTP checks gate deployment and restart unresponsive web instances without
+querying Neon. `/ready` remains an uncached, explicit database/cleanup probe; it still returns 503
+on DB failure or cleanup more than 15 minutes overdue. Sandbox admission retains the same guard. The
 supervisor exits nonzero if nginx, API or the enabled cleanup worker stops unexpectedly. See [Render health checks](https://render.com/docs/health-checks).
 Scheduler and database incidents need separate investigation. Monitor 5xx, p95 latency, 429s, OOM/CPU,
 Neon connections/size/storage, cleanup failures and certificate expiry. Initial thresholds: sustained
 5xx >1%, p95 >2 seconds, memory >80%, storage >75% of budget or repeated reset failures. Tune from
-real measurements. Readiness checks/monitoring can keep Neon compute awake; budget that idle cost.
+real measurements. Do not point any frequent uptime check at `/ready`, `/demo/availability`,
+a session or financial API route: even read-only queries wake Neon. See
+[Neon scale to zero](https://neon.com/docs/introduction/scale-to-zero).
+
+### Idle-compute rollout and verification
+
+1. Review/deploy this change, and explicitly verify **Render Settings → Health Check Path =
+   `/health`** on the existing service; editing `render.yaml` alone does not establish live settings.
+   Set `DB_CONNECT_TIMEOUT=15` seconds on the existing service. Idle runtime pool connections close
+   after 20 seconds; cleanup connections close after each check. Neither pool runs SQL keepalives.
+   The cleanup connection allows 15 seconds for a cold wake; the 45-second attempt watchdog and DB
+   query/lock limits remain. HTTP probes allow 30 seconds; nginx allows 20 seconds upstream.
+2. Keep Render's embedded cleanup enabled and the separate Actions variable false. Confirm the
+   merged monitor uses the new schedules and recovery cleanup has no schedule. Startup still
+   validates runtime identity/marker before listening and the worker reads the persisted deadline;
+   each real restart wakes the DB. Frequent restarts need investigation, not relaxed role checks.
+3. After compute allowance recovers, run one explicit readiness/smoke check. During a quiet window,
+   close Neon SQL editors and DB clients, stop UI/API traffic, and leave `/health` monitoring on.
+   An open sandbox tab periodically renews its session token and counts as traffic even if unused.
+   Observe Neon suspend after its five-minute inactivity window (allow pool idle close time), then
+   confirm an explicit `/ready` wakes it and succeeds. Do not poll SQL to verify suspension.
+4. Check worker logs for the unchanged deadline, connection close/sleep, daily reset and retries.
+   Errors still retry every five minutes to preserve overdue-cleanup protection; a persistent
+   outage or restart loop is not the normal idle case. Rollback must keep `/health` for frequent
+   probes; restore frequent DB monitoring only with an explicit compute-budget decision.
+
+The exhausted allowance is not restored by this fix. In the November 2026 incident, the project
+reported 110.05 CU-hours used on Free. With a 100 CU-hour allowance and 0.25 CU floor, continuously
+awake compute consumes the allowance in about 400 hours (16.7 days). Two isolated daily wakeups
+for cleanup/readiness, each followed by roughly five idle minutes, cost approximately 1.25
+CU-hours in 30 days before query duration, restarts, retries and visitor traffic. This is an
+estimate, not an account guarantee. Keep the approximately $5/month target on existing hosting;
+no paid Neon subscription is required by this change. Sustained real traffic can still exhaust
+Free; inspect the account's actual usage/renewal rather than assuming the demo can stay busy
+24/7 within Free.
 
 Recovery: inspect sanitized logs, service/run status, Neon compute/connections/storage and DNS;
 fix the affected configuration/capacity; redeploy the same known-good SHA and rerun smoke. Application
