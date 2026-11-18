@@ -153,7 +153,8 @@ Credential map:
    serializes reset, and the worker rereads the persisted deadline after each invocation. Once the
    embedded worker is verified, set the **GitHub Actions variable**
    `PUBLIC_DEMO_CLEANUP_ENABLED=false`. This variable is separate from Render's same-named switch.
-   Keep `Public demo availability` enabled for one daily database readiness/admission check.
+   Keep `Public demo availability` enabled: two daily database-free checks and one daily
+   database readiness/admission check, spaced eight hours apart.
 4. Record `sandbox_cleanup_attempt.at`, `next_reset_at`, and `lateness_ms` for the first scheduled
    attempt (target: starts within 60 seconds while the container is healthy), separately from
    `sandbox_database_reset.at` and the following persisted deadline. Record public HTTPS/readiness/
@@ -275,10 +276,11 @@ returns 503 if retained-tenant or rolling-hour capacity is exhausted, even when 
 healthy. Both endpoints also fail when cleanup is more than 15 minutes overdue. The probe
 creates/reserves no sandbox and consumes no creation quota. It is a current capacity snapshot, not a reservation for a future request.
 
-Set repository variable `PUBLIC_DEMO_URL` to enable **Public demo availability** once daily at
-08:17 UTC. It checks `/health`, landing page, documentation, `/ready` and `/demo/availability`;
-manual dispatch defaults to the same read-only check, with an optional full smoke. There is no
-15-minute Actions schedule. Daily database failures can therefore take up to
+Set repository variable `PUBLIC_DEMO_URL` to enable **Public demo availability** every eight
+hours: 00:17 and 16:17 UTC check `/health`, landing page and documentation without DB queries;
+08:17 UTC also checks `/ready` and `/demo/availability`. This totals three scheduled runs daily,
+only one of which wakes Neon. GitHub schedules are best effort and may run late. Manual dispatch
+defaults to the read-only DB check, with an optional full smoke. Daily database failures can therefore take up to
 24 hours to appear in Actions; `/health` success does not establish database readiness. Enable
 operator GitHub Actions failure notifications for monitoring/cleanup and Render web deploy
 notifications. A missing URL deliberately disables network checks. Verify actual notification

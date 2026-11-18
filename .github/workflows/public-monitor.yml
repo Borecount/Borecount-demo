@@ -1,6 +1,7 @@
 name: Public demo availability
 on:
   schedule:
+    - cron: '17 0,16 * * *' # Database-free checks, eight hours either side of the DB check.
     - cron: '17 8 * * *' # One daily database readiness/admission snapshot.
   workflow_dispatch:
     inputs:
@@ -20,13 +21,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check daily readiness, sandbox admission and guides
+      - name: Check liveness or database readiness and guides
         env:
           PUBLIC_DEMO_URL: ${{ vars.PUBLIC_DEMO_URL }}
+          CHECK_SCHEDULE: ${{ github.event.schedule }}
+          EVENT_NAME: ${{ github.event_name }}
           FULL_SMOKE: ${{ inputs.full_smoke }}
         run: |
           if [ "$FULL_SMOKE" = true ]; then
             node scripts/public-demo-smoke.mjs
-          else
+          elif [ "$EVENT_NAME" = workflow_dispatch ] || [ "$CHECK_SCHEDULE" = "17 8 * * *" ]; then
             node scripts/public-demo-smoke.mjs --read-only
+          else
+            node scripts/public-demo-smoke.mjs --liveness
           fi
