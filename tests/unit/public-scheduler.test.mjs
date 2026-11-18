@@ -59,7 +59,7 @@ function harness(initial = 0) {
 }
 
 test('future deadline sleeps on one exact timer, closes the check connection, and does not poll', async () => {
-  const h = harness(1_000_000), deadline = h.now() + 90_000;
+  const h = harness(1_000_000), deadline = h.now() + 24 * 60 * 60_000;
   let connections = 0, closes = 0;
   const scheduler = h.scheduler(() => {
     connections++;
@@ -70,7 +70,7 @@ test('future deadline sleeps on one exact timer, closes the check connection, an
   assert.equal(closes, 1);
   assert.equal([...h.timers.values()].length, 1);
   assert.equal([...h.timers.values()][0].at, deadline);
-  await h.advance(89_999);
+  await h.advance(24 * 60 * 60_000 - 1);
   assert.equal(connections, 1);
   await h.advance(1);
   assert.equal(connections, 2);

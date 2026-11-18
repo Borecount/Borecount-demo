@@ -24,7 +24,7 @@ export function cleanupConnection(target) {
   const url = new URL(target.href);
   url.search = '';
   const sql = postgres(url.href, {
-    max: 1, connect_timeout: 5, idle_timeout: 5,
+    max: 1, connect_timeout: 15, idle_timeout: 5, // Allow a cold Neon wakeup.
     ssl: local ? false : { rejectUnauthorized: true },
     onnotice: () => {},
     connection: { application_name: 'public-demo-cleanup', statement_timeout: 30000, lock_timeout: 2000 },
