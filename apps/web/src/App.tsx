@@ -3,6 +3,7 @@ import { AccountsSection } from './components/AccountsSection';
 import { CreditsSection } from './components/CreditsSection';
 import { ExecutionJournal } from './components/ExecutionJournal';
 import { HoldsSection } from './components/HoldsSection';
+import { LedgerExample, ScenarioPreview } from './components/LedgerIllustrations';
 import { OperationWorkbench } from './components/OperationWorkbench';
 import { ReconciliationSection } from './components/ReconciliationSection';
 import { ReportsSection } from './components/ReportsSection';
@@ -66,45 +67,52 @@ export function App() {
         </nav>
       </header>
       <section className="hero">
-        <p className="eyebrow">OPEN-SOURCE FINANCIAL INFRASTRUCTURE</p>
-        <h1>The ledger layer for products that move money.</h1>
-        <p className="hero-copy">
-          Build wallets, marketplaces, payouts, and stored-value products without maintaining
-          double-entry invariants in application code.
-        </p>
-        <div className="hero-actions">
-          <a className="button-link primary" href="#flows">
-            Try the live demo
-          </a>
-          <a
-            className="button-link secondary"
-            href="mailto:herman.klushin@gmail.com?subject=Borecount%20design%20partnership"
-          >
-            Become a design partner
-          </a>
+        <div className="hero-intro">
+          <p className="eyebrow">OPEN-SOURCE FINANCIAL INFRASTRUCTURE</p>
+          <h1>The ledger layer for products that move money.</h1>
+          <p className="hero-copy">
+            Build wallets, marketplaces, payouts, and stored-value products without maintaining
+            double-entry invariants in application code.
+          </p>
+          <div className="hero-actions">
+            <a className="button-link primary" href="#flows">
+              Try the live demo
+            </a>
+            <a
+              className="button-link secondary"
+              href="mailto:herman.klushin@gmail.com?subject=Borecount%20design%20partnership"
+            >
+              Become a design partner
+            </a>
+          </div>
+          <p className="hero-note">
+            Built for Node.js teams · PostgreSQL-backed · Framework-agnostic core
+          </p>
         </div>
-        <p className="hero-note">
-          Built for Node.js teams · PostgreSQL-backed · Framework-agnostic core
-        </p>
+        <LedgerExample />
       </section>
-      <div className="proof-strip hero-proof">
+      <section className="proof-strip hero-proof" aria-label="Ledger guarantees">
         <div>
-          <strong>Atomic</strong>
-          <span>postings, holds and bulk rollback</span>
+          <span className="proof-metric" aria-label="Zero difference">Δ0.00</span>
+          <strong>Balanced & atomic</strong>
+          <span>equal debits and credits, or no posting</span>
         </div>
         <div>
+          <span className="proof-metric" aria-label="Once">1×</span>
           <strong>Idempotent</strong>
-          <span>safe retries by reference</span>
+          <span>identical retries by reference, one posting</span>
         </div>
         <div>
+          <span className="proof-metric" aria-label="At least zero">≥0</span>
+          <strong>Configurable protection</strong>
+          <span>disable overdraft per account to enforce non-negative balances</span>
+        </div>
+        <div>
+          <span className="proof-metric" aria-label="Zero edits">0 edits</span>
           <strong>Auditable</strong>
-          <span>reversals, history and statements</span>
+          <span>correct with new entries, preserve history</span>
         </div>
-        <div>
-          <strong>Reconciled</strong>
-          <span>provider matching and reports</span>
-        </div>
-      </div>
+      </section>
       <section className="flow-guide" id="flows" aria-label="Guided demo flows">
         <div className="flow-guide-heading">
           <div className="section-intro compact">
@@ -135,6 +143,7 @@ export function App() {
               <span className="scenario-number">
                 0{i + 1} <span>↗</span>
               </span>
+              <ScenarioPreview scenario={s.name} />
               <h3>{s.name}</h3>
               <p>{s.summary}</p>
               <small>{s.steps.length} steps · editable inputs</small>
