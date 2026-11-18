@@ -91,22 +91,26 @@ export function App() {
         </div>
         <LedgerExample />
       </section>
-      <div className="proof-strip hero-proof">
+      <div className="proof-strip hero-proof" aria-label="Ledger guarantees">
         <div>
-          <strong>Atomic</strong>
-          <span>postings, holds and bulk rollback</span>
+          <span className="proof-metric" aria-label="Zero difference">Δ0.00</span>
+          <strong>Balanced & atomic</strong>
+          <span>equal debits and credits, or no posting</span>
         </div>
         <div>
+          <span className="proof-metric" aria-label="Once">1×</span>
           <strong>Idempotent</strong>
-          <span>safe retries by reference</span>
+          <span>identical retries by reference, one posting</span>
         </div>
         <div>
+          <span className="proof-metric" aria-label="At least zero">≥0</span>
+          <strong>Configurable protection</strong>
+          <span>disable overdraft per account to enforce non-negative balances</span>
+        </div>
+        <div>
+          <span className="proof-metric" aria-label="Zero edits">0 edits</span>
           <strong>Auditable</strong>
-          <span>reversals, history and statements</span>
-        </div>
-        <div>
-          <strong>Reconciled</strong>
-          <span>provider matching and reports</span>
+          <span>correct with new entries, preserve history</span>
         </div>
       </div>
       <section className="flow-guide" id="flows" aria-label="Guided demo flows">

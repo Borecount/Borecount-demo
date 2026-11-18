@@ -348,7 +348,9 @@ main { width: min(1440px, calc(100% - 72px)); }
 .example-balances span[aria-hidden] { padding: 0 8px; color: #8a9c90; }
 .example-note { margin: 0; padding: 14px 28px; border-top: 1px solid #e4ebe7; color: #738277; font-size: 11px; line-height: 1.6; }
 .hero-proof strong { color: #294a3a; }
-.hero-proof div { gap: 8px; }
+.hero-proof div { gap: 8px; align-content: start; }
+.hero-proof .proof-metric { display: block; margin-bottom: 8px; color: #294a3a; font: 400 clamp(36px, 3.5vw, 48px)/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: -.07em; }
+.hero-proof div > span:last-child { line-height: 1.5; }
 .scenario-card { padding: 18px; }
 .scenario-card:disabled { opacity: 1; color: #172033; cursor: wait; }
 .scenario-card:disabled:hover { transform: none; border-color: #dfe5eb; }
