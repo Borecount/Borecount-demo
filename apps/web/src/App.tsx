@@ -91,7 +91,7 @@ export function App() {
         </div>
         <LedgerExample />
       </section>
-      <div className="proof-strip hero-proof" aria-label="Ledger guarantees">
+      <section className="proof-strip hero-proof" aria-label="Ledger guarantees">
         <div>
           <span className="proof-metric" aria-label="Zero difference">Δ0.00</span>
           <strong>Balanced & atomic</strong>
@@ -112,7 +112,7 @@ export function App() {
           <strong>Auditable</strong>
           <span>correct with new entries, preserve history</span>
         </div>
-      </div>
+      </section>
       <section className="flow-guide" id="flows" aria-label="Guided demo flows">
         <div className="flow-guide-heading">
           <div className="section-intro compact">
