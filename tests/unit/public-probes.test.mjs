@@ -97,21 +97,20 @@ test('probe failures retain a safe step without exposing transport errors', asyn
   });
 });
 
-test('deployment schedules keep frequent checks database-free and cleanup manual-only', async () => {
+test('deployment schedules check availability once daily and keep cleanup manual-only', async () => {
   const read = path => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
   const [render, monitor, cleanup] = await Promise.all([
     read('render.yaml'), read('.github/workflows/public-monitor.yml'), read('.github/workflows/public-cleanup.yml'),
   ]);
   assert.match(render, /healthCheckPath: \/health\b/);
   assert.match(render, /key: DB_CONNECT_TIMEOUT\s+value: "15"/);
-  assert.match(monitor, /cron: '\*\/15 \* \* \* \*'/);
+  assert.equal([...monitor.matchAll(/cron:/g)].length, 1);
   assert.match(monitor, /cron: '17 8 \* \* \*'/);
-  assert.match(monitor, /else\s+node scripts\/public-demo-smoke.mjs --liveness\s+fi/);
+  assert.match(monitor, /else\s+node scripts\/public-demo-smoke.mjs --read-only\s+fi/);
   // Exercise the actual Actions shell branch for each event; replace only the command.
   const run = monitor.split('        run: |\n')[1].replace(/^          /gm, '')
     .replaceAll('node scripts/public-demo-smoke.mjs', 'printf \"%s\\n\"');
   for (const [event, schedule, full, expected] of [
-    ['schedule', '*/15 * * * *', '', '--liveness'],
     ['schedule', '17 8 * * *', '', '--read-only'],
     ['workflow_dispatch', '', 'false', '--read-only'],
     ['workflow_dispatch', '', 'true', ''],

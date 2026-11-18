@@ -110,8 +110,8 @@ for these local tests. See the rollout/rollback procedure in [PUBLIC_DEMO.md](PU
 
 ## Idle compute correction (November 2026)
 
-The source now routes Render health checks to database-free `/health`; frequent Actions probes
-use liveness, with one daily explicit readiness/admission check. Actions cleanup is manual-only.
+The source now routes Render health checks to database-free `/health`; Actions runs one daily
+explicit readiness/admission check plus manual checks. Actions cleanup is manual-only.
 Regression tests cover DB-free repeated probes, fresh readiness failure/recovery and 24-hour
 scheduler sleep without polling. Fresh/upgrade public PostgreSQL fixtures preserve role, isolation
 and overdue-cleanup protections. No database grants or TLS policies change.
